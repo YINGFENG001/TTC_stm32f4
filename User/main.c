@@ -49,8 +49,12 @@ int main(void)
 
 	while(1)
 	{     
-		//处理串口数据
+		//处理串口数据，只分发任务，不阻塞等待设备完成
 		DealSerialData();
+		//周期性同步末端设备状态
+		Device_Task();
+		//非阻塞上报设备完成事件
+		Device_ReportDone();
 	}
 } 	
 

@@ -1,0 +1,20 @@
+# Keil/uVision user files
+Project/*.uvoptx
+Project/*.uvguix.*
+
+# Build outputs
+Output/
+Listings/
+
+# Temporary build artifacts
+*.dep
+*.crf
+*.d
+*.o
+*.axf
+*.htm
+*.map
+*.lst
+*.lnp
+*.sct
+*.build_log.htm

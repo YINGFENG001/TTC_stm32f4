@@ -18,6 +18,7 @@
 #include "./key/bsp_exti.h"
 #include "./led/bsp_led.h"   
 #include "./stepper/bsp_stepper_init.h"
+#include "./stepper/bsp_stepper_T_speed.h"
 
  /**
   * @brief  配置 PA0 为线中断口，并设置中断优先级

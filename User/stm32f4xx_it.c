@@ -183,7 +183,7 @@ void DEBUG_USART_IRQHandler(void)
 	if(__HAL_UART_GET_FLAG( &UartHandle, UART_FLAG_RXNE ) != RESET)
 	{	
 			data = ( uint16_t)READ_REG(UartHandle.Instance->DR);
-			if(status.running == FALSE && status.out_ena == TRUE)
+			if(1)
 			{
 					//如果为退格键
 					if(data == '\b')

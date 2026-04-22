@@ -1,294 +1,393 @@
 /**
   ******************************************************************************
   * @file    bsp_stepper_T_speed.c
-  * @author  fire
-  * @version V1.0
-  * @date    2020-xx-xx
-  * @brief   步进电机梯形加减速算法
-  ******************************************************************************
-  * @attention
-  *
-  * 实验平台:野火  STM32 F407 开发板  
-  * 论坛    :http://www.firebbs.cn
-  * 淘宝    :http://firestm32.taobao.com
-  *
+  * @brief   双路步进电机梯形加减速算法
   ******************************************************************************
   */
 #include "./stepper/bsp_stepper_T_speed.h"
 #include "./usart/bsp_debug_usart.h"
 
-//系统加减速参数
-speedRampData srd;
-//记录步进电机的位置
-int stepPosition = 0;
-//系统电机、串口状态
-struct GLOBAL_FLAGS status = {FALSE, FALSE,TRUE};
+speedRampData srd[STEPPER_NUM];
+int stepPosition[STEPPER_NUM] = {0};
+struct GLOBAL_FLAGS status = {FALSE, FALSE, TRUE};
+struct GLOBAL_FLAGS motor_status[STEPPER_NUM] = {
+  {FALSE, FALSE, TRUE},
+  {FALSE, FALSE, TRUE}
+};
+static uint32_t stepper_pulses_per_rev[STEPPER_NUM] = {
+  STEPPER_DEFAULT_PULSES_PER_REV,
+  STEPPER_DEFAULT_PULSES_PER_REV
+};
 
-/**
-  * @brief  根据运动方向判断步进电机的运行位置
-  * @param  inc 运动方向
-  * @retval 无
-  */
-void StepperCounter(signed char inc)
+void Stepper_SetMotorPulsesPerRev(uint8_t motor_id, uint32_t pulses_per_rev)
 {
-  //根据方向判断电机位置
-  if(inc == CCW)
+  if (!STEPPER_ID_VALID(motor_id))
   {
-    stepPosition--;
+    return;
   }
-  else
+
+  if (pulses_per_rev == 0)
   {
-    stepPosition++;
+    return;
+  }
+
+  stepper_pulses_per_rev[motor_id] = pulses_per_rev;
+}
+
+static uint8_t Stepper_IsOtherRunning(uint8_t motor_id)
+{
+  uint8_t i;
+  for (i = 0; i < STEPPER_NUM; i++)
+  {
+    if ((i != motor_id) && (motor_status[i].running == TRUE))
+    {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+uint8_t Stepper_IsAnyRunning(void)
+{
+  uint8_t i;
+  for (i = 0; i < STEPPER_NUM; i++)
+  {
+    if (motor_status[i].running == TRUE)
+    {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+static void Stepper_UpdateGlobalStatus(void)
+{
+  uint8_t i;
+  status.running = Stepper_IsAnyRunning();
+  status.out_ena = TRUE;
+
+  for (i = 0; i < STEPPER_NUM; i++)
+  {
+    if (motor_status[i].out_ena != TRUE)
+    {
+      status.out_ena = FALSE;
+      break;
+    }
   }
 }
 
 /**
-  * @brief  驱动器紧急停止
-  * @param  NewState：使能或者禁止
+  * @brief  根据运动方向判断步进电机的运行位置
+  * @param  motor_id 电机编号
+  * @param  inc 运动方向
+  * @retval 无
+  */
+static void StepperCounter(uint8_t motor_id, signed char inc)
+{
+  if (inc == CCW)
+  {
+    stepPosition[motor_id]--;
+  }
+  else
+  {
+    stepPosition[motor_id]++;
+  }
+}
+
+/**
+  * @brief  驱动器使能控制，两路同时生效
+  * @param  NewState：ENABLE为恢复输出，DISABLE为禁止输出
   * @retval 无
   */
 void MSD_ENA(FunctionalState NewState)
 {
-    if(NewState)
+  uint8_t i;
+
+  for (i = 0; i < STEPPER_NUM; i++)
+  {
+    if (NewState)
     {
-      //ENA失能，禁止驱动器输出
-      MOTOR_EN(OFF);
-      //紧急停止标志位为真
-      status.out_ena = FALSE; 
-      printf("\n\r驱动器禁止输出（脱机状态）此时电机为无保持力矩状态，可以手动旋转电机");        
+      MOTOR_EN(i, ON);
+      motor_status[i].out_ena = TRUE;
     }
     else
     {
-      //ENA使能
-      MOTOR_EN(ON);
-      //紧急停止标志位为假
-      status.out_ena = TRUE; 
-      printf("\n\r驱动器恢复运行，此时电机为保持力矩状态，此时串口指令可以正常控制电机");         
+      MOTOR_EN(i, OFF);
+      motor_status[i].out_ena = FALSE;
     }
-    
+  }
+
+  /* 5. 装载首个比较值并启动对应通道中断 */
+  Stepper_UpdateGlobalStatus();
+
+  if (NewState)
+  {
+    printf("\n\r驱动器恢复运行，两路电机均为保持力矩状态");
+  }
+  else
+  {
+    printf("\n\r驱动器禁止输出，两路电机均为脱机状态");
+  }
 }
 
 /*! \brief 以给定的步数移动步进电机
- *  通过计算加速到最大速度，以给定的步数开始减速
- *  如果加速度和减速度很小，步进电机会移动很慢，还没达到最大速度就要开始减速
+ *  \param motor_id 电机编号，0为PE0/PE1/PI5，1为PE4/PI8/PI6
  *  \param step   移动的步数 (正数为顺时针，负数为逆时针).
- *  \param accel  加速度,如果取值为10，实际值为10*0.1*rad/sec^2=1rad/sec^2
- *  \param decel  减速度,如果取值为10，实际值为10*0.1*rad/sec^2=1rad/sec^2
- *  \param speed  最大速度,如果取值为10，实际值为10*0.1*rad/sec=1rad/sec
+ *  \param accel  加速度,单位为0.1rad/sec^2
+ *  \param decel  减速度,单位为0.1rad/sec^2
+ *  \param speed  最大速度,单位为0.1rad/sec
  */
-void stepper_move_T( int32_t step, uint32_t accel, uint32_t decel, uint32_t speed)
-{  
-    //达到最大速度时的步数.
-    unsigned int max_s_lim;
-    //必须开始减速的步数(如果还没加速到达最大速度时)。
-    unsigned int accel_lim;
+StepperCmdResult stepper_move_T(uint8_t motor_id, int32_t step, uint32_t accel, uint32_t decel, uint32_t speed)
+{
+  /* 1. 输入参数与运行状态校验 */
+  unsigned int max_s_lim;
+  unsigned int accel_lim;
+  int tim_count;
+  uint32_t pulses_per_rev;
+  float alpha;
+  float a_t_x10;
+  float a_sq;
+  float a_x200;
 
-		/*根据步数和正负判断*/
-		if(step == 0)
-		{
-				return ;
-		}
-		else if(step < 0)//逆时针
+  if (!STEPPER_ID_VALID(motor_id))
+  {
+    return STEPPER_CMD_ID_ERROR;
+  }
+
+  if (motor_status[motor_id].out_ena != TRUE)
+  {
+    return STEPPER_CMD_DISABLED;
+  }
+
+  if (motor_status[motor_id].running == TRUE)
+  {
+    return STEPPER_CMD_BUSY;
+  }
+
+  if ((step == 0) || (accel == 0) || (decel == 0) || (speed == 0))
+  {
+    return STEPPER_CMD_PARAM_ERROR;
+  }
+
+  /* 2. 按当前电机每圈脉冲数计算梯形加减速系数 */
+  pulses_per_rev = stepper_pulses_per_rev[motor_id];
+  if (pulses_per_rev == 0)
+  {
+    return STEPPER_CMD_PARAM_ERROR;
+  }
+
+  alpha = (float)(2.0f * 3.14159f / pulses_per_rev);
+  a_t_x10 = (float)(10.0f * alpha * T1_FREQ);
+  a_sq = (float)(2.0f * 100000.0f * alpha);
+  a_x200 = (float)(200.0f * alpha);
+
+  /* 3. 根据步数符号确定方向，并设置方向引脚 */
+  if (step < 0)
+  {
+    srd[motor_id].dir = CCW;
+    step = -step;
+  }
+  else
+  {
+    srd[motor_id].dir = CW;
+  }
+
+  MOTOR_DIR(motor_id, srd[motor_id].dir);
+
+  /* 4. 初始化运行状态机，计算加速段、匀速段和减速段参数 */
+  if (step == 1)
+  {
+    srd[motor_id].accel_count = -1;
+    srd[motor_id].run_state = DECEL;
+    srd[motor_id].step_delay = 1000;
+    motor_status[motor_id].running = TRUE;
+  }
+  else
+  {
+    srd[motor_id].min_delay = (int32_t)(a_t_x10 / speed);
+    srd[motor_id].step_delay = (int32_t)((T1_FREQ_148 * sqrt(a_sq / accel)) / 10);
+
+    if ((srd[motor_id].min_delay <= 0) || (srd[motor_id].step_delay <= 0))
     {
-        srd.dir = CCW;
-        step = -step;
+      return STEPPER_CMD_PARAM_ERROR;
     }
-    else//顺时针
-    {
-        srd.dir = CW;
-    }	// 输出电机方向
-		MOTOR_DIR(srd.dir);
-	
-		    
-    // 如果只移动一步
-    if(step == 1)
-    {
-        // 只移动一步
-        srd.accel_count = -1;
-        // 减速状态
-        srd.run_state = DECEL;
-        // 短延时
-        srd.step_delay = 1000;
-        // 配置电机为运行状态
-        status.running = TRUE;
-     }
-		
-    // 步数不为零才移动
-    else if(step != 0)
-    {
-			// 设置最大速度极限, 计算得到min_delay用于定时器的计数器的值。
-			// min_delay = (alpha / tt)/ w
-			srd.min_delay = (int32_t)(A_T_x10/speed);
 
-			// 通过计算第一个(c0) 的步进延时来设定加速度，其中accel单位为0.1rad/sec^2
-			// step_delay = 1/tt * sqrt(2*alpha/accel)
-			// step_delay = ( tfreq*0.676/10 )*10 * sqrt( (2*alpha*100000) / (accel*10) )/100
-			srd.step_delay = (int32_t)((T1_FREQ_148 * sqrt(A_SQ / accel))/10);
-
-			// 计算多少步之后达到最大速度的限制
-			// max_s_lim = speed^2 / (2*alpha*accel)
-			max_s_lim = (uint32_t)(speed*speed/(A_x200*accel/10));
-			// 如果达到最大速度小于0.5步，我们将四舍五入为0
-			// 但实际我们必须移动至少一步才能达到想要的速度
-			if(max_s_lim == 0)
-			{
-					max_s_lim = 1;
-			}
-
-    // 计算多少步之后我们必须开始减速
-    // n1 = (n1+n2)decel / (accel + decel)
-    accel_lim = ((long)step*decel) / (accel+decel);
-    // 我们必须加速至少1步才能才能开始减速.
-    if(accel_lim == 0)
+    if ((srd[motor_id].step_delay / 2) > TIM_PERIOD)
     {
-        accel_lim = 1;
+      return STEPPER_CMD_PARAM_ERROR;
     }
-    // 使用限制条件我们可以计算出第一次开始减速的位置
-    //srd.decel_val为负数
-    if(accel_lim <= max_s_lim)
+
+    max_s_lim = (uint32_t)(speed * speed / (a_x200 * accel / 10));
+    if (max_s_lim == 0)
     {
-        srd.decel_val = accel_lim - step;
+      max_s_lim = 1;
+    }
+
+    accel_lim = ((long)step * decel) / (accel + decel);
+    if (accel_lim == 0)
+    {
+      accel_lim = 1;
+    }
+
+    if (accel_lim <= max_s_lim)
+    {
+      srd[motor_id].decel_val = accel_lim - step;
     }
     else
     {
-        srd.decel_val = -(long)(max_s_lim*accel/decel);
+      srd[motor_id].decel_val = -(long)(max_s_lim * accel / decel);
     }
-    // 当只剩下一步我们必须减速
-    if(srd.decel_val == 0)
+
+    if (srd[motor_id].decel_val == 0)
     {
-        srd.decel_val = -1;
+      srd[motor_id].decel_val = -1;
     }
 
-    // 计算开始减速时的步数
-    srd.decel_start = step + srd.decel_val;
+    srd[motor_id].decel_start = step + srd[motor_id].decel_val;
 
-		// 如果最大速度很慢，我们就不需要进行加速运动
-		if(srd.step_delay <= srd.min_delay)
-		{
-			srd.step_delay = srd.min_delay;
-			srd.run_state = RUN;
-		}
-		else
-		{
-			srd.run_state = ACCEL;
-		}
-    // 复位加速度计数值
-    srd.accel_count = 0;
-    status.running = TRUE;
+    if (srd[motor_id].step_delay <= srd[motor_id].min_delay)
+    {
+      srd[motor_id].step_delay = srd[motor_id].min_delay;
+      srd[motor_id].run_state = RUN;
+    }
+    else
+    {
+      srd[motor_id].run_state = ACCEL;
+    }
+
+    srd[motor_id].accel_count = 0;
+    motor_status[motor_id].running = TRUE;
   }
-	/*获取当前计数值*/
-  int tim_count=__HAL_TIM_GET_COUNTER(&TIM_TimeBaseStructure);
-	/*在当前计数值基础上设置定时器比较值*/
-  __HAL_TIM_SET_COMPARE(&TIM_TimeBaseStructure,MOTOR_PUL_CHANNEL_x,tim_count+srd.step_delay/2); 
-	/*使能定时器通道*/
-	TIM_CCxChannelCmd(MOTOR_PUL_TIM, MOTOR_PUL_CHANNEL_x, TIM_CCx_DISABLE);
-  __HAL_TIM_ENABLE_IT(&TIM_TimeBaseStructure, TIM_IT_CC1);
+
+  /* 5. 装载首个比较值并启动对应通道中断 */
+  Stepper_UpdateGlobalStatus();
+
+  tim_count = __HAL_TIM_GET_COUNTER(&TIM_TimeBaseStructure);
+  __HAL_TIM_SET_COMPARE(&TIM_TimeBaseStructure,
+                        stepper_hw[motor_id].pul_channel,
+                        tim_count + srd[motor_id].step_delay / 2);
+
+  TIM_CCxChannelCmd(MOTOR_PUL_TIM, stepper_hw[motor_id].pul_channel, TIM_CCx_DISABLE);
+  __HAL_TIM_CLEAR_IT(&TIM_TimeBaseStructure, stepper_hw[motor_id].pul_it);
+  __HAL_TIM_ENABLE_IT(&TIM_TimeBaseStructure, stepper_hw[motor_id].pul_it);
   __HAL_TIM_MOE_ENABLE(&TIM_TimeBaseStructure);
   __HAL_TIM_ENABLE(&TIM_TimeBaseStructure);
+
+  return STEPPER_CMD_OK;
 }
 
 /**
-  * @brief  速度决策
-	*	@note 	在中断中使用，每进一次中断，决策一次
+  * @brief  速度决策，在TIM8比较中断中按通道调用
+  * @param  motor_id 电机编号
   * @retval 无
   */
-void speed_decision()
+void speed_decision(uint8_t motor_id)
 {
- __IO uint32_t tim_count=0;
+  __IO uint32_t tim_count = 0;
   __IO uint32_t tmp = 0;
-  // 保存新（下）一个延时周期
-  uint16_t new_step_delay=0;
-  // 加速过程中最后一次延时（脉冲周期）.
-  __IO static uint16_t last_accel_delay=0;
-  // 总移动步数计数器
-  __IO static uint32_t step_count = 0;
-  // 记录new_step_delay中的余数，提高下一步计算的精度
-  __IO static int32_t rest = 0;
-  //定时器使用翻转模式，需要进入两次中断才输出一个完整脉冲
-  __IO static uint8_t i=0;
-  
-  if(__HAL_TIM_GET_IT_SOURCE(&TIM_TimeBaseStructure, MOTOR_TIM_IT_CCx) !=RESET)
+  uint16_t new_step_delay = 0;
+  __IO static uint16_t last_accel_delay[STEPPER_NUM] = {0};
+  __IO static uint32_t step_count[STEPPER_NUM] = {0};
+  __IO static int32_t rest[STEPPER_NUM] = {0};
+  __IO static uint8_t edge_count[STEPPER_NUM] = {0};
+
+  if (!STEPPER_ID_VALID(motor_id))
   {
-    // 清楚定时器中断
-    __HAL_TIM_CLEAR_IT(&TIM_TimeBaseStructure, MOTOR_TIM_IT_CCx);
-    
-    // 设置比较值
-    tim_count=__HAL_TIM_GET_COUNTER(&TIM_TimeBaseStructure);
-    tmp = tim_count+srd.step_delay/2;
-    __HAL_TIM_SET_COMPARE(&TIM_TimeBaseStructure,MOTOR_PUL_CHANNEL_x,tmp);
+    return;
+  }
 
-    i++;     // 定时器中断次数计数值
-    if(i==2) // 2次，说明已经输出一个完整脉冲
+  /* 1. 检查当前通道的比较中断是否到达 */
+  if ((__HAL_TIM_GET_FLAG(&TIM_TimeBaseStructure, stepper_hw[motor_id].pul_flag) != RESET) &&
+      (__HAL_TIM_GET_IT_SOURCE(&TIM_TimeBaseStructure, stepper_hw[motor_id].pul_it) != RESET))
+  {
+    __HAL_TIM_CLEAR_IT(&TIM_TimeBaseStructure, stepper_hw[motor_id].pul_it);
+
+    /* 2. 重新装载下一次比较值，维持脉冲翻转节奏 */
+    tim_count = __HAL_TIM_GET_COUNTER(&TIM_TimeBaseStructure);
+    tmp = tim_count + srd[motor_id].step_delay / 2;
+    __HAL_TIM_SET_COMPARE(&TIM_TimeBaseStructure, stepper_hw[motor_id].pul_channel, tmp);
+
+    /* 3. 每经过两次翻转，才算输出了一个完整步进脉冲 */
+    edge_count[motor_id]++;
+    if (edge_count[motor_id] == 2)
     {
-			i=0;   // 清零定时器中断次数计数值
-			switch(srd.run_state) 
-			{
-				/*步进电机停止状态*/
-				case STOP:
-						step_count = 0;
-						rest = 0;
+      edge_count[motor_id] = 0;
 
-						// 关闭通道
-						HAL_TIM_OC_Stop_IT(&TIM_TimeBaseStructure,MOTOR_PUL_CHANNEL_x);
+      /* 4. 根据当前状态推进梯形加减速状态机 */
+      switch (srd[motor_id].run_state)
+      {
+        case STOP:
+          step_count[motor_id] = 0;
+          rest[motor_id] = 0;
+          TIM_CCxChannelCmd(MOTOR_PUL_TIM, stepper_hw[motor_id].pul_channel, TIM_CCx_DISABLE);
+          __HAL_TIM_DISABLE_IT(&TIM_TimeBaseStructure, stepper_hw[motor_id].pul_it);
 
-						status.running = FALSE;
-						break;
-				/*步进电机加速状态*/
-				case ACCEL:
-						StepperCounter(srd.dir);
-				    TIM_CCxChannelCmd(MOTOR_PUL_TIM, MOTOR_PUL_CHANNEL_x, TIM_CCx_ENABLE);
-						step_count++;
-						srd.accel_count++;
-						new_step_delay = srd.step_delay - (((2 * (long)srd.step_delay) 
-														 + rest)/(4 * srd.accel_count + 1));
-						rest = ((2 * (long)srd.step_delay)+rest)%(4 * srd.accel_count + 1);
-						//检查是够应该开始减速
-						if(step_count >= srd.decel_start) {
-							srd.accel_count = srd.decel_val;
-							srd.run_state = DECEL;
-						}
-						//检查是否到达期望的最大速度
-						else if(new_step_delay <= srd.min_delay) {
-							last_accel_delay = new_step_delay;
-							new_step_delay = srd.min_delay;
-							rest = 0;
-							srd.run_state = RUN;
-						}
-						break;
-				/*步进电机最大速度运行状态*/
-				case RUN:
+          motor_status[motor_id].running = FALSE;
+          Stepper_UpdateGlobalStatus();
 
-			      StepperCounter(srd.dir);//根据脉冲计数位置
-						step_count++;
-						new_step_delay = srd.min_delay;
-						//检查是否需要开始减速
-						if(step_count >= srd.decel_start) 
-						{
-							srd.accel_count = srd.decel_val;
-							//以最后一次加速的延时作为开始减速的延时
-							new_step_delay = last_accel_delay;
-							srd.run_state = DECEL;
-						}
-						break;
-				/*步进电机减速状态*/
-				case DECEL:
+          if (Stepper_IsOtherRunning(motor_id) != TRUE)
+          {
+            __HAL_TIM_DISABLE(&TIM_TimeBaseStructure);
+          }
+          break;
 
-			      StepperCounter(srd.dir);
-						step_count++;
-						srd.accel_count++;
-						new_step_delay = srd.step_delay - (((2 * (long)srd.step_delay) 
-														 + rest)/(4 * srd.accel_count + 1));
-						rest = ((2 * (long)srd.step_delay)+rest)%(4 * srd.accel_count + 1);
-						//检查是否为最后一步
-						if(srd.accel_count >= 0)
-						{
-							srd.run_state = STOP;
-						}
-						break;
-			}
-			/*求得下一次间隔时间*/
-			srd.step_delay = new_step_delay;
+        case ACCEL:
+          StepperCounter(motor_id, srd[motor_id].dir);
+          TIM_CCxChannelCmd(MOTOR_PUL_TIM, stepper_hw[motor_id].pul_channel, TIM_CCx_ENABLE);
+          step_count[motor_id]++;
+          srd[motor_id].accel_count++;
+          new_step_delay = srd[motor_id].step_delay - (((2 * (long)srd[motor_id].step_delay) + rest[motor_id]) / (4 * srd[motor_id].accel_count + 1));
+          rest[motor_id] = ((2 * (long)srd[motor_id].step_delay) + rest[motor_id]) % (4 * srd[motor_id].accel_count + 1);
+
+          if (step_count[motor_id] >= srd[motor_id].decel_start)
+          {
+            srd[motor_id].accel_count = srd[motor_id].decel_val;
+            srd[motor_id].run_state = DECEL;
+          }
+          else if (new_step_delay <= srd[motor_id].min_delay)
+          {
+            last_accel_delay[motor_id] = new_step_delay;
+            new_step_delay = srd[motor_id].min_delay;
+            rest[motor_id] = 0;
+            srd[motor_id].run_state = RUN;
+          }
+          break;
+
+        case RUN:
+          StepperCounter(motor_id, srd[motor_id].dir);
+          step_count[motor_id]++;
+          new_step_delay = srd[motor_id].min_delay;
+
+          if (step_count[motor_id] >= srd[motor_id].decel_start)
+          {
+            srd[motor_id].accel_count = srd[motor_id].decel_val;
+            if (last_accel_delay[motor_id] == 0)
+            {
+              new_step_delay = srd[motor_id].step_delay;
+            }
+            else
+            {
+              new_step_delay = last_accel_delay[motor_id];
+            }
+            srd[motor_id].run_state = DECEL;
+          }
+          break;
+
+        case DECEL:
+          StepperCounter(motor_id, srd[motor_id].dir);
+          step_count[motor_id]++;
+          srd[motor_id].accel_count++;
+          new_step_delay = srd[motor_id].step_delay - (((2 * (long)srd[motor_id].step_delay) + rest[motor_id]) / (4 * srd[motor_id].accel_count + 1));
+          rest[motor_id] = ((2 * (long)srd[motor_id].step_delay) + rest[motor_id]) % (4 * srd[motor_id].accel_count + 1);
+
+          if (srd[motor_id].accel_count >= 0)
+          {
+            srd[motor_id].run_state = STOP;
+          }
+          break;
+      }
+
+      srd[motor_id].step_delay = new_step_delay;
     }
   }
 }
-
