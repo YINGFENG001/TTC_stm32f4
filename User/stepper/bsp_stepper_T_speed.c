@@ -1,7 +1,7 @@
 /**
   ******************************************************************************
   * @file    bsp_stepper_T_speed.c
-  * @brief   Ë«Â·²½½øµç»úÌİĞÎ¼Ó¼õËÙËã·¨
+  * @brief   åŒè·¯æ­¥è¿›ç”µæœºæ¢¯å½¢åŠ å‡é€Ÿç®—æ³•
   ******************************************************************************
   */
 #include "./stepper/bsp_stepper_T_speed.h"
@@ -77,10 +77,10 @@ static void Stepper_UpdateGlobalStatus(void)
 }
 
 /**
-  * @brief  ¸ù¾İÔË¶¯·½ÏòÅĞ¶Ï²½½øµç»úµÄÔËĞĞÎ»ÖÃ
-  * @param  motor_id µç»ú±àºÅ
-  * @param  inc ÔË¶¯·½Ïò
-  * @retval ÎŞ
+  * @brief  æ ¹æ®è¿åŠ¨æ–¹å‘åˆ¤æ–­æ­¥è¿›ç”µæœºçš„è¿è¡Œä½ç½®
+  * @param  motor_id ç”µæœºç¼–å·
+  * @param  inc è¿åŠ¨æ–¹å‘
+  * @retval æ— 
   */
 static void StepperCounter(uint8_t motor_id, signed char inc)
 {
@@ -95,9 +95,9 @@ static void StepperCounter(uint8_t motor_id, signed char inc)
 }
 
 /**
-  * @brief  Çı¶¯Æ÷Ê¹ÄÜ¿ØÖÆ£¬Á½Â·Í¬Ê±ÉúĞ§
-  * @param  NewState£ºENABLEÎª»Ö¸´Êä³ö£¬DISABLEÎª½ûÖ¹Êä³ö
-  * @retval ÎŞ
+  * @brief  é©±åŠ¨å™¨ä½¿èƒ½æ§åˆ¶ï¼Œä¸¤è·¯åŒæ—¶ç”Ÿæ•ˆ
+  * @param  NewStateï¼šENABLEä¸ºæ¢å¤è¾“å‡ºï¼ŒDISABLEä¸ºç¦æ­¢è¾“å‡º
+  * @retval æ— 
   */
 void MSD_ENA(FunctionalState NewState)
 {
@@ -117,29 +117,29 @@ void MSD_ENA(FunctionalState NewState)
     }
   }
 
-  /* 5. ×°ÔØÊ×¸ö±È½ÏÖµ²¢Æô¶¯¶ÔÓ¦Í¨µÀÖĞ¶Ï */
+  /* 5. è£…è½½é¦–ä¸ªæ¯”è¾ƒå€¼å¹¶å¯åŠ¨å¯¹åº”é€šé“ä¸­æ–­ */
   Stepper_UpdateGlobalStatus();
 
   if (NewState)
   {
-    printf("\n\rÇı¶¯Æ÷»Ö¸´ÔËĞĞ£¬Á½Â·µç»ú¾ùÎª±£³ÖÁ¦¾Ø×´Ì¬");
+    printf("\n\ré©±åŠ¨å™¨æ¢å¤è¿è¡Œï¼Œä¸¤è·¯ç”µæœºå‡ä¸ºä¿æŒåŠ›çŸ©çŠ¶æ€");
   }
   else
   {
-    printf("\n\rÇı¶¯Æ÷½ûÖ¹Êä³ö£¬Á½Â·µç»ú¾ùÎªÍÑ»ú×´Ì¬");
+    printf("\n\ré©±åŠ¨å™¨ç¦æ­¢è¾“å‡ºï¼Œä¸¤è·¯ç”µæœºå‡ä¸ºè„±æœºçŠ¶æ€");
   }
 }
 
-/*! \brief ÒÔ¸ø¶¨µÄ²½ÊıÒÆ¶¯²½½øµç»ú
- *  \param motor_id µç»ú±àºÅ£¬0ÎªPE0/PE1/PI5£¬1ÎªPE4/PI8/PI6
- *  \param step   ÒÆ¶¯µÄ²½Êı (ÕıÊıÎªË³Ê±Õë£¬¸ºÊıÎªÄæÊ±Õë).
- *  \param accel  ¼ÓËÙ¶È,µ¥Î»Îª0.1rad/sec^2
- *  \param decel  ¼õËÙ¶È,µ¥Î»Îª0.1rad/sec^2
- *  \param speed  ×î´óËÙ¶È,µ¥Î»Îª0.1rad/sec
+/*! \brief ä»¥ç»™å®šçš„æ­¥æ•°ç§»åŠ¨æ­¥è¿›ç”µæœº
+ *  \param motor_id ç”µæœºç¼–å·ï¼Œ0ä¸ºPE0/PE1/PI5ï¼Œ1ä¸ºPE4/PI8/PI6
+ *  \param step   ç§»åŠ¨çš„æ­¥æ•° (æ­£æ•°ä¸ºé¡ºæ—¶é’ˆï¼Œè´Ÿæ•°ä¸ºé€†æ—¶é’ˆ).
+ *  \param accel  åŠ é€Ÿåº¦,å•ä½ä¸º0.1rad/sec^2
+ *  \param decel  å‡é€Ÿåº¦,å•ä½ä¸º0.1rad/sec^2
+ *  \param speed  æœ€å¤§é€Ÿåº¦,å•ä½ä¸º0.1rad/sec
  */
 StepperCmdResult stepper_move_T(uint8_t motor_id, int32_t step, uint32_t accel, uint32_t decel, uint32_t speed)
 {
-  /* 1. ÊäÈë²ÎÊıÓëÔËĞĞ×´Ì¬Ğ£Ñé */
+  /* 1. è¾“å…¥å‚æ•°ä¸è¿è¡ŒçŠ¶æ€æ ¡éªŒ */
   unsigned int max_s_lim;
   unsigned int accel_lim;
   int tim_count;
@@ -169,7 +169,7 @@ StepperCmdResult stepper_move_T(uint8_t motor_id, int32_t step, uint32_t accel, 
     return STEPPER_CMD_PARAM_ERROR;
   }
 
-  /* 2. °´µ±Ç°µç»úÃ¿È¦Âö³åÊı¼ÆËãÌİĞÎ¼Ó¼õËÙÏµÊı */
+  /* 2. æŒ‰å½“å‰ç”µæœºæ¯åœˆè„‰å†²æ•°è®¡ç®—æ¢¯å½¢åŠ å‡é€Ÿç³»æ•° */
   pulses_per_rev = stepper_pulses_per_rev[motor_id];
   if (pulses_per_rev == 0)
   {
@@ -181,7 +181,7 @@ StepperCmdResult stepper_move_T(uint8_t motor_id, int32_t step, uint32_t accel, 
   a_sq = (float)(2.0f * 100000.0f * alpha);
   a_x200 = (float)(200.0f * alpha);
 
-  /* 3. ¸ù¾İ²½Êı·ûºÅÈ·¶¨·½Ïò£¬²¢ÉèÖÃ·½ÏòÒı½Å */
+  /* 3. æ ¹æ®æ­¥æ•°ç¬¦å·ç¡®å®šæ–¹å‘ï¼Œå¹¶è®¾ç½®æ–¹å‘å¼•è„š */
   if (step < 0)
   {
     srd[motor_id].dir = CCW;
@@ -194,7 +194,7 @@ StepperCmdResult stepper_move_T(uint8_t motor_id, int32_t step, uint32_t accel, 
 
   MOTOR_DIR(motor_id, srd[motor_id].dir);
 
-  /* 4. ³õÊ¼»¯ÔËĞĞ×´Ì¬»ú£¬¼ÆËã¼ÓËÙ¶Î¡¢ÔÈËÙ¶ÎºÍ¼õËÙ¶Î²ÎÊı */
+  /* 4. åˆå§‹åŒ–è¿è¡ŒçŠ¶æ€æœºï¼Œè®¡ç®—åŠ é€Ÿæ®µã€åŒ€é€Ÿæ®µå’Œå‡é€Ÿæ®µå‚æ•° */
   if (step == 1)
   {
     srd[motor_id].accel_count = -1;
@@ -259,7 +259,7 @@ StepperCmdResult stepper_move_T(uint8_t motor_id, int32_t step, uint32_t accel, 
     motor_status[motor_id].running = TRUE;
   }
 
-  /* 5. ×°ÔØÊ×¸ö±È½ÏÖµ²¢Æô¶¯¶ÔÓ¦Í¨µÀÖĞ¶Ï */
+  /* 5. è£…è½½é¦–ä¸ªæ¯”è¾ƒå€¼å¹¶å¯åŠ¨å¯¹åº”é€šé“ä¸­æ–­ */
   Stepper_UpdateGlobalStatus();
 
   tim_count = __HAL_TIM_GET_COUNTER(&TIM_TimeBaseStructure);
@@ -277,9 +277,9 @@ StepperCmdResult stepper_move_T(uint8_t motor_id, int32_t step, uint32_t accel, 
 }
 
 /**
-  * @brief  ËÙ¶È¾ö²ß£¬ÔÚTIM8±È½ÏÖĞ¶ÏÖĞ°´Í¨µÀµ÷ÓÃ
-  * @param  motor_id µç»ú±àºÅ
-  * @retval ÎŞ
+  * @brief  é€Ÿåº¦å†³ç­–ï¼Œåœ¨TIM8æ¯”è¾ƒä¸­æ–­ä¸­æŒ‰é€šé“è°ƒç”¨
+  * @param  motor_id ç”µæœºç¼–å·
+  * @retval æ— 
   */
 void speed_decision(uint8_t motor_id)
 {
@@ -296,24 +296,24 @@ void speed_decision(uint8_t motor_id)
     return;
   }
 
-  /* 1. ¼ì²éµ±Ç°Í¨µÀµÄ±È½ÏÖĞ¶ÏÊÇ·ñµ½´ï */
+  /* 1. æ£€æŸ¥å½“å‰é€šé“çš„æ¯”è¾ƒä¸­æ–­æ˜¯å¦åˆ°è¾¾ */
   if ((__HAL_TIM_GET_FLAG(&TIM_TimeBaseStructure, stepper_hw[motor_id].pul_flag) != RESET) &&
       (__HAL_TIM_GET_IT_SOURCE(&TIM_TimeBaseStructure, stepper_hw[motor_id].pul_it) != RESET))
   {
     __HAL_TIM_CLEAR_IT(&TIM_TimeBaseStructure, stepper_hw[motor_id].pul_it);
 
-    /* 2. ÖØĞÂ×°ÔØÏÂÒ»´Î±È½ÏÖµ£¬Î¬³ÖÂö³å·­×ª½Ú×à */
+    /* 2. é‡æ–°è£…è½½ä¸‹ä¸€æ¬¡æ¯”è¾ƒå€¼ï¼Œç»´æŒè„‰å†²ç¿»è½¬èŠ‚å¥ */
     tim_count = __HAL_TIM_GET_COUNTER(&TIM_TimeBaseStructure);
     tmp = tim_count + srd[motor_id].step_delay / 2;
     __HAL_TIM_SET_COMPARE(&TIM_TimeBaseStructure, stepper_hw[motor_id].pul_channel, tmp);
 
-    /* 3. Ã¿¾­¹ıÁ½´Î·­×ª£¬²ÅËãÊä³öÁËÒ»¸öÍêÕû²½½øÂö³å */
+    /* 3. æ¯ç»è¿‡ä¸¤æ¬¡ç¿»è½¬ï¼Œæ‰ç®—è¾“å‡ºäº†ä¸€ä¸ªå®Œæ•´æ­¥è¿›è„‰å†² */
     edge_count[motor_id]++;
     if (edge_count[motor_id] == 2)
     {
       edge_count[motor_id] = 0;
 
-      /* 4. ¸ù¾İµ±Ç°×´Ì¬ÍÆ½øÌİĞÎ¼Ó¼õËÙ×´Ì¬»ú */
+      /* 4. æ ¹æ®å½“å‰çŠ¶æ€æ¨è¿›æ¢¯å½¢åŠ å‡é€ŸçŠ¶æ€æœº */
       switch (srd[motor_id].run_state)
       {
         case STOP:

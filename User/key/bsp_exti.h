@@ -3,7 +3,7 @@
 
 #include "stm32f4xx.h"
 
-//Òý½Å¶¨Òå
+//å¼•è„šå®šä¹‰
 /*******************************************************/
 #define KEY1_INT_GPIO_PORT                GPIOA
 #define KEY1_INT_GPIO_CLK_ENABLE()        __GPIOA_CLK_ENABLE();

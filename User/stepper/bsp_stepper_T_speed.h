@@ -5,22 +5,22 @@
 #include "./stepper/bsp_stepper_init.h"
 #include "math.h"
 
-/* µ¥Ì¨²½½øµç»úµÄÌİĞÎ¼Ó¼õËÙÔËĞĞ²ÎÊı */
+/* å•å°æ­¥è¿›ç”µæœºçš„æ¢¯å½¢åŠ å‡é€Ÿè¿è¡Œå‚æ•° */
 typedef struct {
-  unsigned char run_state : 3; /* µ±Ç°ÔËĞĞ×´Ì¬£ºSTOP/ACCEL/DECEL/RUN */
-  unsigned char dir : 1;       /* µ±Ç°·½Ïò£ºCW/CCW */
-  unsigned int step_delay;     /* ÏÂÒ»´Î±È½ÏÊÂ¼şµÄÑÓÊ±ÖÜÆÚ */
-  unsigned int decel_start;    /* ¿ªÊ¼½øÈë¼õËÙ¶ÎµÄ²½ÊıÎ»ÖÃ */
-  signed int decel_val;        /* ¼õËÙ¶Î²¹³¥Öµ */
-  signed int min_delay;        /* ÔÈËÙ¶Î×îĞ¡ÑÓÊ±£¬¶ÔÓ¦×î´óËÙ¶È */
-  signed int accel_count;      /* ¼Ó¼õËÙ¶Î¼ÆÊıÆ÷ */
+  unsigned char run_state : 3; /* å½“å‰è¿è¡ŒçŠ¶æ€ï¼šSTOP/ACCEL/DECEL/RUN */
+  unsigned char dir : 1;       /* å½“å‰æ–¹å‘ï¼šCW/CCW */
+  unsigned int step_delay;     /* ä¸‹ä¸€æ¬¡æ¯”è¾ƒäº‹ä»¶çš„å»¶æ—¶å‘¨æœŸ */
+  unsigned int decel_start;    /* å¼€å§‹è¿›å…¥å‡é€Ÿæ®µçš„æ­¥æ•°ä½ç½® */
+  signed int decel_val;        /* å‡é€Ÿæ®µè¡¥å¿å€¼ */
+  signed int min_delay;        /* åŒ€é€Ÿæ®µæœ€å°å»¶æ—¶ï¼Œå¯¹åº”æœ€å¤§é€Ÿåº¦ */
+  signed int accel_count;      /* åŠ å‡é€Ÿæ®µè®¡æ•°å™¨ */
 } speedRampData;
 
-/* ÏµÍ³¼¶×´Ì¬±êÖ¾ */
+/* ç³»ç»Ÿçº§çŠ¶æ€æ ‡å¿— */
 struct GLOBAL_FLAGS {
-  unsigned char running:1; /* µ±Ç°ÊÇ·ñ´æÔÚÈÎÒâµç»úÕıÔÚÔËĞĞ */
-  unsigned char cmd:1;     /* ´®¿ÚÊÇ·ñ½ÓÊÕµ½´ı´¦ÀíÃüÁî */
-  unsigned char out_ena:1; /* Çı¶¯Æ÷Êä³öÊÇ·ñÊ¹ÄÜ */
+  unsigned char running:1; /* å½“å‰æ˜¯å¦å­˜åœ¨ä»»æ„ç”µæœºæ­£åœ¨è¿è¡Œ */
+  unsigned char cmd:1;     /* ä¸²å£æ˜¯å¦æ¥æ”¶åˆ°å¾…å¤„ç†å‘½ä»¤ */
+  unsigned char out_ena:1; /* é©±åŠ¨å™¨è¾“å‡ºæ˜¯å¦ä½¿èƒ½ */
 };
 
 typedef enum {
@@ -33,20 +33,20 @@ typedef enum {
 
 #define FALSE             0
 #define TRUE              1
-#define CW                0 // Ë³Ê±Õë
-#define CCW               1 // ÄæÊ±Õë
+#define CW                0 // é¡ºæ—¶é’ˆ
+#define CCW               1 // é€†æ—¶é’ˆ
 
-#define STOP              0 // Í£Ö¹×´Ì¬
-#define ACCEL             1 // ¼ÓËÙ×´Ì¬
-#define DECEL             2 // ¼õËÙ×´Ì¬
-#define RUN               3 // ÔÈËÙ×´Ì¬
+#define STOP              0 // åœæ­¢çŠ¶æ€
+#define ACCEL             1 // åŠ é€ŸçŠ¶æ€
+#define DECEL             2 // å‡é€ŸçŠ¶æ€
+#define RUN               3 // åŒ€é€ŸçŠ¶æ€
 
-/*ÆµÂÊÏà¹Ø²ÎÊı*/
+/*é¢‘ç‡ç›¸å…³å‚æ•°*/
 #define TIM_PRESCALER      31
 #define T1_FREQ           (SystemCoreClock/(TIM_PRESCALER+1))
 #define T1_FREQ_148       ((float)((T1_FREQ*0.676)/10))
 
-/* Ä¬ÈÏÖµ½öÓÃÓÚÉÏµç³õÊ¼»¯£¬Êµ¼ÊÔËĞĞ²ÎÊıÓÉ¸÷Éè±¸µ¥¶ÀÏÂ·¢ */
+/* é»˜è®¤å€¼ä»…ç”¨äºä¸Šç”µåˆå§‹åŒ–ï¼Œå®é™…è¿è¡Œå‚æ•°ç”±å„è®¾å¤‡å•ç‹¬ä¸‹å‘ */
 #define STEPPER_DEFAULT_PULSES_PER_REV  6400U
 
 extern speedRampData srd[STEPPER_NUM];

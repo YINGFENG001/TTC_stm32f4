@@ -174,7 +174,7 @@ void Usart_SendByte(char ch)
 {
 	WRITE_REG(UartHandle.Instance->DR,ch); 
 }
-//½ÓÊÕÊý×éÖ¸Õë
+//æŽ¥æ”¶æ•°ç»„æŒ‡é’ˆ
 extern unsigned char UART_RxPtr;
 void DEBUG_USART_IRQHandler(void)
 {	
@@ -185,10 +185,10 @@ void DEBUG_USART_IRQHandler(void)
 			data = ( uint16_t)READ_REG(UartHandle.Instance->DR);
 			if(1)
 			{
-					//Èç¹ûÎªÍË¸ñ¼ü
+					//å¦‚æžœä¸ºé€€æ ¼é”®
 					if(data == '\b')
 					{
-						//Èç¹ûÖ¸Õë²»ÔÚÊý×éµÄ¿ªÊ¼Î»ÖÃ
+						//å¦‚æžœæŒ‡é’ˆä¸åœ¨æ•°ç»„çš„å¼€å§‹ä½ç½®
 						if(UART_RxPtr)
 						{						
 							Usart_SendByte('\b');
@@ -198,11 +198,11 @@ void DEBUG_USART_IRQHandler(void)
 							UART_RxBuffer[UART_RxPtr]=0x00;
 						}
 					}
-					//Èç¹û²»ÊÇÍË¸ñ¼ü
+					//å¦‚æžœä¸æ˜¯é€€æ ¼é”®
 					else
 					{
-						//½«Êý¾ÝÌîÈëÊý×éUART_RxBuffer
-						//²¢ÇÒ½«ºóÃæµÄÒ»¸öÔªËØÇåÁãÈç¹ûÊý×éÂúÁËÔòÐ´Èë×îºóÒ»¸öÔªËØÎªÖ¹
+						//å°†æ•°æ®å¡«å…¥æ•°ç»„UART_RxBuffer
+						//å¹¶ä¸”å°†åŽé¢çš„ä¸€ä¸ªå…ƒç´ æ¸…é›¶å¦‚æžœæ•°ç»„æ»¡äº†åˆ™å†™å…¥æœ€åŽä¸€ä¸ªå…ƒç´ ä¸ºæ­¢
 						if(UART_RxPtr < (UART_RX_BUFFER_SIZE - 1))
 						{
 							UART_RxBuffer[UART_RxPtr] = data;
@@ -214,7 +214,7 @@ void DEBUG_USART_IRQHandler(void)
 							UART_RxBuffer[UART_RxPtr - 1] = data;
 							Usart_SendByte('\b');
 						}
-						//Èç¹ûÎª»Ø³µ¼ü£¬Ôò¿ªÊ¼´¦Àí´®¿ÚÊý¾Ý
+						//å¦‚æžœä¸ºå›žè½¦é”®ï¼Œåˆ™å¼€å§‹å¤„ç†ä¸²å£æ•°æ®
 						if(data == 13)
 						{
 							status.cmd = TRUE;

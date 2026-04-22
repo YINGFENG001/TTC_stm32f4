@@ -20,7 +20,7 @@
 #define HIGH                           1
 #define LOW                            0
 
-/* Çı¶¯Æ÷ ENA ¶ËÎªµÍµçÆ½ÓĞĞ§ */
+/* é©±åŠ¨å™¨ ENA ç«¯ä¸ºä½ç”µå¹³æœ‰æ•ˆ */
 #define ON                             0
 #define OFF                            (!0)
 
@@ -31,17 +31,17 @@
 #define GPIO_L(p,i)                    { (p)->BSRR = (uint32_t)(i) << 16; }
 #define GPIO_T(p,i)                    { (p)->ODR ^= (i); }
 
-/* µ¥Â·²½½øµç»úÓ²¼ş×ÊÔ´Ó³Éä±í */
+/* å•è·¯æ­¥è¿›ç”µæœºç¡¬ä»¶èµ„æºæ˜ å°„è¡¨ */
 typedef struct {
-  GPIO_TypeDef *dir_port; /* ·½Ïò¿ØÖÆGPIO¶Ë¿Ú */
-  uint16_t dir_pin;       /* ·½Ïò¿ØÖÆGPIOÒı½Å */
-  GPIO_TypeDef *en_port;  /* Ê¹ÄÜ¿ØÖÆGPIO¶Ë¿Ú */
-  uint16_t en_pin;        /* Ê¹ÄÜ¿ØÖÆGPIOÒı½Å */
-  GPIO_TypeDef *pul_port; /* Âö³åÊä³öGPIO¶Ë¿Ú */
-  uint16_t pul_pin;       /* Âö³åÊä³öGPIOÒı½Å */
-  uint32_t pul_channel;   /* TIM8 Êä³ö±È½ÏÍ¨µÀ */
-  uint32_t pul_it;        /* TIM8 ¶ÔÓ¦±È½ÏÖĞ¶ÏÔ´ */
-  uint32_t pul_flag;      /* TIM8 ¶ÔÓ¦±È½Ï±êÖ¾Î» */
+  GPIO_TypeDef *dir_port; /* æ–¹å‘æ§åˆ¶GPIOç«¯å£ */
+  uint16_t dir_pin;       /* æ–¹å‘æ§åˆ¶GPIOå¼•è„š */
+  GPIO_TypeDef *en_port;  /* ä½¿èƒ½æ§åˆ¶GPIOç«¯å£ */
+  uint16_t en_pin;        /* ä½¿èƒ½æ§åˆ¶GPIOå¼•è„š */
+  GPIO_TypeDef *pul_port; /* è„‰å†²è¾“å‡ºGPIOç«¯å£ */
+  uint16_t pul_pin;       /* è„‰å†²è¾“å‡ºGPIOå¼•è„š */
+  uint32_t pul_channel;   /* TIM8 è¾“å‡ºæ¯”è¾ƒé€šé“ */
+  uint32_t pul_it;        /* TIM8 å¯¹åº”æ¯”è¾ƒä¸­æ–­æº */
+  uint32_t pul_flag;      /* TIM8 å¯¹åº”æ¯”è¾ƒæ ‡å¿—ä½ */
 } StepperHw;
 
 extern const StepperHw stepper_hw[STEPPER_NUM];

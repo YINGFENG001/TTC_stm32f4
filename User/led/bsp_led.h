@@ -3,7 +3,7 @@
 
 #include "stm32f4xx.h"
 
-//Òı½Å¶¨Òå
+//å¼•è„šå®šä¹‰
 /*******************************************************/
 #define LED1_PIN                  GPIO_PIN_15                
 #define LED1_GPIO_PORT            GPIOA                     
@@ -22,14 +22,14 @@
 #define LED4_GPIO_CLK_ENABLE()    __GPIOB_CLK_ENABLE()
 
 
-/** ¿ØÖÆLEDµÆÁÁÃğµÄºê£¬
-	* LEDµÍµçÆ½ÁÁ£¬ÉèÖÃON=0£¬OFF=1
-	* ÈôLED¸ßµçÆ½ÁÁ£¬°ÑºêÉèÖÃ³ÉON=1 £¬OFF=0 ¼´¿É
+/** æ§åˆ¶LEDç¯äº®ç­çš„å®ï¼Œ
+	* LEDä½ç”µå¹³äº®ï¼Œè®¾ç½®ON=0ï¼ŒOFF=1
+	* è‹¥LEDé«˜ç”µå¹³äº®ï¼ŒæŠŠå®è®¾ç½®æˆON=1 ï¼ŒOFF=0 å³å¯
 	*/
 //#define ON  GPIO_PIN_RESET
 //#define OFF GPIO_PIN_SET
 
-/* ´ø²Îºê£¬¿ÉÒÔÏñÄÚÁªº¯ÊıÒ»ÑùÊ¹ÓÃ */
+/* å¸¦å‚å®ï¼Œå¯ä»¥åƒå†…è”å‡½æ•°ä¸€æ ·ä½¿ç”¨ */
 #define LED1(a)	HAL_GPIO_WritePin(LED1_GPIO_PORT,LED1_PIN,a)
 
 #define LED2(a)	HAL_GPIO_WritePin(LED2_GPIO_PORT,LED2_PIN,a)
@@ -47,13 +47,13 @@
 #define LED_OFF		!0
 
 
-/* Ö±½Ó²Ù×÷¼Ä´æÆ÷µÄ·½·¨¿ØÖÆIO */
-#define	digitalHi(p,i)			{p->BSRR=i;}			  //ÉèÖÃÎª¸ßµçÆ½		
-#define digitalLo(p,i)			{p->BSRR=(uint32_t)i << 16;}				//Êä³öµÍµçÆ½
-#define digitalToggle(p,i)		{p->ODR ^=i;}			//Êä³ö·´×ª×´Ì¬
+/* ç›´æ¥æ“ä½œå¯„å­˜å™¨çš„æ–¹æ³•æ§åˆ¶IO */
+#define	digitalHi(p,i)			{p->BSRR=i;}			  //è®¾ç½®ä¸ºé«˜ç”µå¹³		
+#define digitalLo(p,i)			{p->BSRR=(uint32_t)i << 16;}				//è¾“å‡ºä½ç”µå¹³
+#define digitalToggle(p,i)		{p->ODR ^=i;}			//è¾“å‡ºåè½¬çŠ¶æ€
 
 
-/* ¶¨Òå¿ØÖÆIOµÄºê */
+/* å®šä¹‰æ§åˆ¶IOçš„å® */
 #define LED1_TOGGLE		digitalToggle(LED1_GPIO_PORT,LED1_PIN)
 #define LED1_OFF		digitalHi(LED1_GPIO_PORT,LED1_PIN)
 #define LED1_ON			digitalLo(LED1_GPIO_PORT,LED1_PIN)

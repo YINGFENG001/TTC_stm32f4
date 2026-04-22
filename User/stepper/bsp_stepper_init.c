@@ -1,7 +1,7 @@
 /**
   ******************************************************************************
   * @file    bsp_stepper_init.c
-  * @brief   Ë«Â·²½½øµç»ú³õÊ¼»¯
+  * @brief   åŒè·¯æ­¥è¿›ç”µæœºåˆå§‹åŒ–
   ******************************************************************************
   */
 #include "./stepper/bsp_stepper_init.h"
@@ -21,9 +21,9 @@ const StepperHw stepper_hw[STEPPER_NUM] = {
 };
 
 /**
-  * @brief  ÅäÖÃTIM¸´ÓÃÊä³öPWMÊ±ÓÃµ½µÄI/O
-  * @param  ÎŞ
-  * @retval ÎŞ
+  * @brief  é…ç½®TIMå¤ç”¨è¾“å‡ºPWMæ—¶ç”¨åˆ°çš„I/O
+  * @param  æ— 
+  * @retval æ— 
   */
 static void Stepper_GPIO_Config(void)
 {
@@ -61,9 +61,9 @@ static void Stepper_GPIO_Config(void)
 }
 
 /**
-  * @brief  ÖĞ¶ÏÓÅÏÈ¼¶ÅäÖÃ
-  * @param  ÎŞ
-  * @retval ÎŞ
+  * @brief  ä¸­æ–­ä¼˜å…ˆçº§é…ç½®
+  * @param  æ— 
+  * @retval æ— 
   */
 static void TIMx_NVIC_Configuration(void)
 {
@@ -103,8 +103,8 @@ void TIM_PWMOUTPUT_Config(void)
 }
 
 /**
-  * @brief  Òı½Å³õÊ¼»¯
-  * @retval ÎŞ
+  * @brief  å¼•è„šåˆå§‹åŒ–
+  * @retval æ— 
   */
 void stepper_Init(void)
 {
@@ -114,8 +114,8 @@ void stepper_Init(void)
 }
 
 /**
-  * @brief  TIM8±È½ÏÖĞ¶Ï·şÎñº¯Êı£¬·Ö±ğ´¦ÀíCH1ºÍCH2
-  * @retval ÎŞ
+  * @brief  TIM8æ¯”è¾ƒä¸­æ–­æœåŠ¡å‡½æ•°ï¼Œåˆ†åˆ«å¤„ç†CH1å’ŒCH2
+  * @retval æ— 
   */
 void MOTOR_PUL_IRQHandler(void)
 {

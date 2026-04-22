@@ -1,7 +1,7 @@
 /**
   ******************************************************************************
   * @file    bsp_stepper_usart_ctl.c
-  * @brief   Ë«µç»úÃû³ÆÊ½´®¿ÚÈÎÎñ·Ö·¢£¨°´Éè±¸Êä³öÖá»úĞµµ¥Î»ÊäÈë£©
+  * @brief   åŒç”µæœºåç§°å¼ä¸²å£ä»»åŠ¡åˆ†å‘ï¼ˆæŒ‰è®¾å¤‡è¾“å‡ºè½´æœºæ¢°å•ä½è¾“å…¥ï¼‰
   ******************************************************************************
   */
 
@@ -30,53 +30,53 @@ typedef enum {
   DEV_ERROR
 } DeviceState;
 
-/* µç»ú±¾ÌåºÍ»úĞµ´«¶¯²ÎÊı */
+/* ç”µæœºæœ¬ä½“å’Œæœºæ¢°ä¼ åŠ¨å‚æ•° */
 typedef struct {
-  uint16_t motor_steps_per_rev; /* µç»úÕû²½Êı/È¦£¬ÀıÈç200 */
-  uint16_t micro_step;          /* Çı¶¯Æ÷Ï¸·ÖÊı£¬ÀıÈç8Ï¸·Ö */
-  uint16_t gear_num;            /* ´«¶¯±ÈµÄ·Ö×Ó£¬±íÊ¾µç»úÖáÈ¦Êı */
-  uint16_t gear_den;            /* ´«¶¯±ÈµÄ·ÖÄ¸£¬±íÊ¾Êä³öÖáÈ¦Êı */
+  uint16_t motor_steps_per_rev; /* ç”µæœºæ•´æ­¥æ•°/åœˆï¼Œä¾‹å¦‚200 */
+  uint16_t micro_step;          /* é©±åŠ¨å™¨ç»†åˆ†æ•°ï¼Œä¾‹å¦‚8ç»†åˆ† */
+  uint16_t gear_num;            /* ä¼ åŠ¨æ¯”çš„åˆ†å­ï¼Œè¡¨ç¤ºç”µæœºè½´åœˆæ•° */
+  uint16_t gear_den;            /* ä¼ åŠ¨æ¯”çš„åˆ†æ¯ï¼Œè¡¨ç¤ºè¾“å‡ºè½´åœˆæ•° */
 } StepperMechanicalConfig;
 
-/* µ¥Ì¨µç»ú¶ÔÍâ±©Â¶µÄ²ÎÊı·¶Î§ÏŞÖÆ */
+/* å•å°ç”µæœºå¯¹å¤–æš´éœ²çš„å‚æ•°èŒƒå›´é™åˆ¶ */
 typedef struct {
-  int32_t min_rev_0p1;          /* ×îĞ¡Î»ÒÆÊäÈëÖµ£¬µ¥Î»0.1È¦ */
-  int32_t max_rev_0p1;          /* ×î´óÎ»ÒÆÊäÈëÖµ£¬µ¥Î»0.1È¦ */
-  uint32_t min_rpm;             /* ×îĞ¡ËÙ¶ÈÊäÈëÖµ£¬µ¥Î»rpm */
-  uint32_t max_rpm;             /* ×î´óËÙ¶ÈÊäÈëÖµ£¬µ¥Î»rpm */
-  uint32_t min_accel_rpm_s;     /* ×îĞ¡¼ÓËÙ¶ÈÊäÈëÖµ£¬µ¥Î»rpm/s */
-  uint32_t max_accel_rpm_s;     /* ×î´ó¼ÓËÙ¶ÈÊäÈëÖµ£¬µ¥Î»rpm/s */
-  uint32_t min_decel_rpm_s;     /* ×îĞ¡¼õËÙ¶ÈÊäÈëÖµ£¬µ¥Î»rpm/s */
-  uint32_t max_decel_rpm_s;     /* ×î´ó¼õËÙ¶ÈÊäÈëÖµ£¬µ¥Î»rpm/s */
-  uint32_t max_motor_rpm;       /* µç»úÖáµÈĞ§×î¸ß×ªËÙÏŞÖÆ£¬µ¥Î»rpm */
+  int32_t min_rev_0p1;          /* æœ€å°ä½ç§»è¾“å…¥å€¼ï¼Œå•ä½0.1åœˆ */
+  int32_t max_rev_0p1;          /* æœ€å¤§ä½ç§»è¾“å…¥å€¼ï¼Œå•ä½0.1åœˆ */
+  uint32_t min_rpm;             /* æœ€å°é€Ÿåº¦è¾“å…¥å€¼ï¼Œå•ä½rpm */
+  uint32_t max_rpm;             /* æœ€å¤§é€Ÿåº¦è¾“å…¥å€¼ï¼Œå•ä½rpm */
+  uint32_t min_accel_rpm_s;     /* æœ€å°åŠ é€Ÿåº¦è¾“å…¥å€¼ï¼Œå•ä½rpm/s */
+  uint32_t max_accel_rpm_s;     /* æœ€å¤§åŠ é€Ÿåº¦è¾“å…¥å€¼ï¼Œå•ä½rpm/s */
+  uint32_t min_decel_rpm_s;     /* æœ€å°å‡é€Ÿåº¦è¾“å…¥å€¼ï¼Œå•ä½rpm/s */
+  uint32_t max_decel_rpm_s;     /* æœ€å¤§å‡é€Ÿåº¦è¾“å…¥å€¼ï¼Œå•ä½rpm/s */
+  uint32_t max_motor_rpm;       /* ç”µæœºè½´ç­‰æ•ˆæœ€é«˜è½¬é€Ÿé™åˆ¶ï¼Œå•ä½rpm */
 } StepperSafetyLimit;
 
-/* µ¥Ì¨µç»úµ±Ç°±£´æµÄ¿ØÖÆ²ÎÊı */
+/* å•å°ç”µæœºå½“å‰ä¿å­˜çš„æ§åˆ¶å‚æ•° */
 typedef struct {
-  int32_t rev_0p1;          /* µ±Ç°Ä¿±êÎ»ÒÆ£¬µ¥Î»0.1È¦ */
-  uint32_t accel_rpm_s;     /* µ±Ç°¼ÓËÙ¶È£¬µ¥Î»rpm/s */
-  uint32_t decel_rpm_s;     /* µ±Ç°¼õËÙ¶È£¬µ¥Î»rpm/s */
-  uint32_t rpm;             /* µ±Ç°Ä¿±êËÙ¶È£¬µ¥Î»rpm */
+  int32_t rev_0p1;          /* å½“å‰ç›®æ ‡ä½ç§»ï¼Œå•ä½0.1åœˆ */
+  uint32_t accel_rpm_s;     /* å½“å‰åŠ é€Ÿåº¦ï¼Œå•ä½rpm/s */
+  uint32_t decel_rpm_s;     /* å½“å‰å‡é€Ÿåº¦ï¼Œå•ä½rpm/s */
+  uint32_t rpm;             /* å½“å‰ç›®æ ‡é€Ÿåº¦ï¼Œå•ä½rpm */
 } StepperParam;
 
-/* µ¥Ì¨µç»úµÄÍêÕûÅäÖÃ£º»úĞµ²ÎÊı + ÏŞÖÆ + Ä¬ÈÏ¿ØÖÆ²ÎÊı */
+/* å•å°ç”µæœºçš„å®Œæ•´é…ç½®ï¼šæœºæ¢°å‚æ•° + é™åˆ¶ + é»˜è®¤æ§åˆ¶å‚æ•° */
 typedef struct {
-  StepperMechanicalConfig mech; /* »úĞµºÍ´«¶¯²ÎÊı */
-  StepperSafetyLimit limit;     /* ²ÎÊı·¶Î§ÏŞÖÆ */
-  StepperParam param;           /* µ±Ç°Ä¬ÈÏ/ÔËĞĞ²ÎÊı */
+  StepperMechanicalConfig mech; /* æœºæ¢°å’Œä¼ åŠ¨å‚æ•° */
+  StepperSafetyLimit limit;     /* å‚æ•°èŒƒå›´é™åˆ¶ */
+  StepperParam param;           /* å½“å‰é»˜è®¤/è¿è¡Œå‚æ•° */
 } StepperDeviceConfig;
 
-/* ´®¿Ú²ãÎ¬»¤µÄÉè±¸×´Ì¬¿ìÕÕ */
+/* ä¸²å£å±‚ç»´æŠ¤çš„è®¾å¤‡çŠ¶æ€å¿«ç…§ */
 typedef struct {
-  DeviceId id;           /* Éè±¸±àºÅ */
-  const char *name;      /* ´®¿ÚÃüÁîÃû³Æ */
-  DeviceType type;       /* Éè±¸ÀàĞÍ */
-  DeviceState state;     /* µ±Ç°×´Ì¬ */
-  uint8_t enabled;       /* ÊÇ·ñÊ¹ÄÜÊä³ö */
-  int32_t position;      /* µ±Ç°Î»ÖÃĞÅÏ¢£¬µ¥Î»0.1È¦ */
-  int32_t target;        /* µ±Ç°Ä¿±êÎ»ÖÃĞÅÏ¢£¬µ¥Î»0.1È¦ */
-  int32_t value;         /* Ô¤ÁôµÄÍ¨ÓÃÊıÖµ×´Ì¬ */
-  uint32_t error_code;   /* Éè±¸´íÎóÂë */
+  DeviceId id;           /* è®¾å¤‡ç¼–å· */
+  const char *name;      /* ä¸²å£å‘½ä»¤åç§° */
+  DeviceType type;       /* è®¾å¤‡ç±»å‹ */
+  DeviceState state;     /* å½“å‰çŠ¶æ€ */
+  uint8_t enabled;       /* æ˜¯å¦ä½¿èƒ½è¾“å‡º */
+  int32_t position;      /* å½“å‰ä½ç½®ä¿¡æ¯ï¼Œå•ä½0.1åœˆ */
+  int32_t target;        /* å½“å‰ç›®æ ‡ä½ç½®ä¿¡æ¯ï¼Œå•ä½0.1åœˆ */
+  int32_t value;         /* é¢„ç•™çš„é€šç”¨æ•°å€¼çŠ¶æ€ */
+  uint32_t error_code;   /* è®¾å¤‡é”™è¯¯ç  */
 } EndDevice;
 
 #define INPUT_REV_SCALE                10
@@ -90,13 +90,13 @@ static EndDevice devices[DEVICE_NUM] = {
 };
 
 static StepperDeviceConfig stepper_cfg[STEPPER_NUM] = {
-  /* mtor1£º200²½/È¦£¬8Ï¸·Ö£¬1:1Ö±Çı */
+  /* mtor1ï¼š200æ­¥/åœˆï¼Œ8ç»†åˆ†ï¼Œ1:1ç›´é©± */
   {
     {200, 8, 1, 1},
     {-MTOR_MAX_OUTPUT_REV_0P1, MTOR_MAX_OUTPUT_REV_0P1, 1, 600, 60, 500, 60, 500, 600},
     {50, 100, 100, 100}
   },
-  /* mtor2£º200²½/È¦£¬8Ï¸·Ö£¬1:1Ö±Çı */
+  /* mtor2ï¼š200æ­¥/åœˆï¼Œ8ç»†åˆ†ï¼Œ1:1ç›´é©± */
   {
     {200, 8, 1, 1},
     {-MTOR_MAX_OUTPUT_REV_0P1, MTOR_MAX_OUTPUT_REV_0P1, 1, 600, 60, 500, 60, 500, 600},
@@ -213,18 +213,18 @@ static int32_t Stepper_StepToRev0p1(uint8_t motor_id, int32_t step)
 }
 
 /*
- * ÊäÈë²ãµ¥Î»Ô¼¶¨£º
- * 1. rev_0p1      : 0.1 È¦£¨°´Éè±¸Êä³öÖá¼ÆËã£©
- * 2. rpm          : rpm£¨°´Éè±¸Êä³öÖá¼ÆËã£©
- * 3. accel_rpm_s  : rpm/s£¨°´Éè±¸Êä³öÖá¼ÆËã£©
- * 4. decel_rpm_s  : rpm/s£¨°´Éè±¸Êä³öÖá¼ÆËã£©
+ * è¾“å…¥å±‚å•ä½çº¦å®šï¼š
+ * 1. rev_0p1      : 0.1 åœˆï¼ˆæŒ‰è®¾å¤‡è¾“å‡ºè½´è®¡ç®—ï¼‰
+ * 2. rpm          : rpmï¼ˆæŒ‰è®¾å¤‡è¾“å‡ºè½´è®¡ç®—ï¼‰
+ * 3. accel_rpm_s  : rpm/sï¼ˆæŒ‰è®¾å¤‡è¾“å‡ºè½´è®¡ç®—ï¼‰
+ * 4. decel_rpm_s  : rpm/sï¼ˆæŒ‰è®¾å¤‡è¾“å‡ºè½´è®¡ç®—ï¼‰
  *
- * µ±Ç°Ó²¼şÇ°Ìá£º
- * 1. ÏµÍ³Ê±ÖÓ SystemCoreClock = 168MHz
- * 2. TIM8 ²ÉÓÃÊä³ö±È½Ï Toggle Ä£Ê½Êä³ö²½½øÂö³å
- * 3. TIM_PRESCALER = 31£¬¶¨Ê±Æ÷¼ÆÊıÆµÂÊ = 168MHz / (31 + 1) = 5.25MHz
- * 4. TIM_PERIOD = 0xFFFF£¬µ±Ç°Ê¹ÓÃ16Î»¼ÆÊıÆ÷
- * 5. Á½Ì¨µç»ú¾ùÎª 200²½/È¦¡¢8Ï¸·Ö¡¢1:1Ö±Çı
+ * å½“å‰ç¡¬ä»¶å‰æï¼š
+ * 1. ç³»ç»Ÿæ—¶é’Ÿ SystemCoreClock = 168MHz
+ * 2. TIM8 é‡‡ç”¨è¾“å‡ºæ¯”è¾ƒ Toggle æ¨¡å¼è¾“å‡ºæ­¥è¿›è„‰å†²
+ * 3. TIM_PRESCALER = 31ï¼Œå®šæ—¶å™¨è®¡æ•°é¢‘ç‡ = 168MHz / (31 + 1) = 5.25MHz
+ * 4. TIM_PERIOD = 0xFFFFï¼Œå½“å‰ä½¿ç”¨16ä½è®¡æ•°å™¨
+ * 5. ä¸¤å°ç”µæœºå‡ä¸º 200æ­¥/åœˆã€8ç»†åˆ†ã€1:1ç›´é©±
  */
 static int32_t Stepper_RevToStep(uint8_t motor_id, int32_t rev_0p1)
 {
@@ -382,7 +382,7 @@ static void Stepper_PrintLimit(uint8_t motor_id)
 
 static void ShowCommandHelp(void)
 {
-  printf("\n\rÃüÁîËµÃ÷:");
+  printf("\n\rå‘½ä»¤è¯´æ˜:");
   printf("\n\r  mtor1 turn [rev]");
   printf("\n\r  mtor1 move [rev] [accel] [decel] [rpm]");
   printf("\n\r  mtor1 accel [value]");
@@ -393,8 +393,8 @@ static void ShowCommandHelp(void)
   printf("\n\r  mtor2 accel [value]");
   printf("\n\r  mtor2 decel [value]");
   printf("\n\r  mtor2 rpm [value]");
-  printf("\n\r  status  ²é¿´È«²¿Éè±¸×´Ì¬");
-  printf("\n\rÊ¾Àı: mtor1 move 50 100 100 100  -> 5È¦, 100rpm/s, 100rpm/s, 100rpm");
+  printf("\n\r  status  æŸ¥çœ‹å…¨éƒ¨è®¾å¤‡çŠ¶æ€");
+  printf("\n\rç¤ºä¾‹: mtor1 move 50 100 100 100  -> 5åœˆ, 100rpm/s, 100rpm/s, 100rpm");
   printf("\n\r");
 }
 
@@ -402,16 +402,16 @@ void ShowHelp(void)
 {
   Stepper_ApplyMechanicalConfig();
 
-  printf("\n\r¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ªË«µç»ú²ÎÊı¸ÅÀÀ¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª");
-  printf("\n\rÉè±¸:");
-  printf("\n\r  mtor1 : µç»ú0 ENA PE0, DIR PE1, PUL PI5(TIM8_CH1)");
-  printf("\n\r  mtor2 : µç»ú1 ENA PE4, DIR PI8, PUL PI6(TIM8_CH2)");
-  printf("\n\rµ¥Î»ËµÃ÷:");
-  printf("\n\r  1rev = 0.1È¦£¬Ä¬ÈÏÖµÎª50£¨5È¦£©£¬·¶Î§Îª-10000~10000£¨-1000È¦~1000È¦£©");
-  printf("\n\r  1accel = 1rpm/s£¬Ä¬ÈÏÖµÎª100£¬·¶Î§Îª60~500");
-  printf("\n\r  1decel = 1rpm/s£¬Ä¬ÈÏÖµÎª100£¬·¶Î§Îª60~500");
-  printf("\n\r  1rpm = 1rpm£¬Ä¬ÈÏÖµÎª100£¬·¶Î§Îª1~600");
-  printf("\n\rÊäÈë ? ²é¿´ÃüÁîËµÃ÷£¬ÊäÈë status ²é¿´È«²¿Éè±¸×´Ì¬\n\r");
+  printf("\n\râ€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”åŒç”µæœºå‚æ•°æ¦‚è§ˆâ€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”");
+  printf("\n\rè®¾å¤‡:");
+  printf("\n\r  mtor1 : ç”µæœº0 ENA PE0, DIR PE1, PUL PI5(TIM8_CH1)");
+  printf("\n\r  mtor2 : ç”µæœº1 ENA PE4, DIR PI8, PUL PI6(TIM8_CH2)");
+  printf("\n\rå•ä½è¯´æ˜:");
+  printf("\n\r  1rev = 0.1åœˆï¼Œé»˜è®¤å€¼ä¸º50ï¼ˆ5åœˆï¼‰ï¼ŒèŒƒå›´ä¸º-10000~10000ï¼ˆ-1000åœˆ~1000åœˆï¼‰");
+  printf("\n\r  1accel = 1rpm/sï¼Œé»˜è®¤å€¼ä¸º100ï¼ŒèŒƒå›´ä¸º60~500");
+  printf("\n\r  1decel = 1rpm/sï¼Œé»˜è®¤å€¼ä¸º100ï¼ŒèŒƒå›´ä¸º60~500");
+  printf("\n\r  1rpm = 1rpmï¼Œé»˜è®¤å€¼ä¸º100ï¼ŒèŒƒå›´ä¸º1~600");
+  printf("\n\rè¾“å…¥ ? æŸ¥çœ‹å‘½ä»¤è¯´æ˜ï¼Œè¾“å…¥ status æŸ¥çœ‹å…¨éƒ¨è®¾å¤‡çŠ¶æ€\n\r");
 }
 
 static void Stepper_PrintParam(uint8_t motor_id)
@@ -532,7 +532,7 @@ static void Stepper_Command(uint8_t device_id, int argc, char *argv[])
     return;
   }
 
-  /* ²éÑ¯ÀàÃüÁî£ºÍ³Ò»´òÓ¡È«²¿Éè±¸×´Ì¬ */
+  /* æŸ¥è¯¢ç±»å‘½ä»¤ï¼šç»Ÿä¸€æ‰“å°å…¨éƒ¨è®¾å¤‡çŠ¶æ€ */
   if (strcmp(argv[1], "status") == 0)
   {
     Device_PrintStatus(device_id);
@@ -541,7 +541,7 @@ static void Stepper_Command(uint8_t device_id, int argc, char *argv[])
     return;
   }
 
-  /* ÔË¶¯ÀàÃüÁî£º¸üĞÂÄ¿±ê²ÎÊı£¬Íê³É·¶Î§Ğ£ÑéºóÆô¶¯µç»ú */
+  /* è¿åŠ¨ç±»å‘½ä»¤ï¼šæ›´æ–°ç›®æ ‡å‚æ•°ï¼Œå®ŒæˆèŒƒå›´æ ¡éªŒåå¯åŠ¨ç”µæœº */
   if ((strcmp(argv[1], "turn") == 0) || (strcmp(argv[1], "move") == 0))
   {
     if ((strcmp(argv[1], "turn") == 0 && argc != 3) ||
@@ -588,7 +588,7 @@ static void Stepper_Command(uint8_t device_id, int argc, char *argv[])
     return;
   }
 
-  /* ²ÎÊıÉèÖÃÀàÃüÁî£ºµ¥¶ÀĞŞ¸Ä¼ÓËÙ¶È¡¢¼õËÙ¶È»òËÙ¶È */
+  /* å‚æ•°è®¾ç½®ç±»å‘½ä»¤ï¼šå•ç‹¬ä¿®æ”¹åŠ é€Ÿåº¦ã€å‡é€Ÿåº¦æˆ–é€Ÿåº¦ */
   if ((strcmp(argv[1], "accel") == 0) ||
       (strcmp(argv[1], "decel") == 0) ||
       (strcmp(argv[1], "rpm") == 0))
@@ -715,9 +715,9 @@ static void Command_Dispatch(char *line)
 }
 
 /**
-  * @brief  ´¦Àí´®¿Ú½ÓÊÕµ½µÄÊı¾İ£¬Ö»·Ö·¢ÈÎÎñ£¬²»µÈ´ıÉè±¸Íê³É
-  * @param  ÎŞ
-  * @retval ÎŞ
+  * @brief  å¤„ç†ä¸²å£æ¥æ”¶åˆ°çš„æ•°æ®ï¼Œåªåˆ†å‘ä»»åŠ¡ï¼Œä¸ç­‰å¾…è®¾å¤‡å®Œæˆ
+  * @param  æ— 
+  * @retval æ— 
   */
 void DealSerialData(void)
 {
