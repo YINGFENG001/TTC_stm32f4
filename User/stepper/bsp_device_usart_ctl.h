@@ -1,5 +1,5 @@
-#ifndef __BSP_STEPPER_USART_CTL_H
-#define	__BSP_STEPPER_USART_CTL_H
+#ifndef __BSP_DEVICE_USART_CTL_H
+#define	__BSP_DEVICE_USART_CTL_H
 
 #include "stm32f4xx.h"
 #include <math.h>

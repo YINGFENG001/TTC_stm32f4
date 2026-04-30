@@ -16,6 +16,7 @@
   */ 
   
 #include "./usart/bsp_debug_usart.h"
+#include "./gripper/bsp_gripper_uart.h"
 
 UART_HandleTypeDef UartHandle;
 
@@ -55,8 +56,10 @@ void DEBUG_USART_Config(void)
 void HAL_UART_MspInit(UART_HandleTypeDef *huart)
 {  
   GPIO_InitTypeDef  GPIO_InitStruct;
-  
-  DEBUG_USART_CLK_ENABLE();
+
+  if (huart->Instance == DEBUG_USART)
+  {
+    DEBUG_USART_CLK_ENABLE();
 	
 	DEBUG_USART_RX_GPIO_CLK_ENABLE();
   DEBUG_USART_TX_GPIO_CLK_ENABLE();
@@ -80,6 +83,24 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart)
  
   HAL_NVIC_SetPriority(DEBUG_USART_IRQ ,0,1);	//抢占优先级0，子优先级1
   HAL_NVIC_EnableIRQ(DEBUG_USART_IRQ );		    //使能USART1中断通道  
+  }
+  else if (huart->Instance == GRIPPER_UART)
+  {
+    GRIPPER_UART_CLK_ENABLE();
+    GRIPPER_UART_TX_GPIO_CLK_ENABLE();
+    GRIPPER_UART_RX_GPIO_CLK_ENABLE();
+
+    GPIO_InitStruct.Pin = GRIPPER_UART_TX_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GRIPPER_UART_TX_AF;
+    HAL_GPIO_Init(GRIPPER_UART_TX_GPIO_PORT, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GRIPPER_UART_RX_PIN;
+    GPIO_InitStruct.Alternate = GRIPPER_UART_RX_AF;
+    HAL_GPIO_Init(GRIPPER_UART_RX_GPIO_PORT, &GPIO_InitStruct);
+  }
 }
 
 

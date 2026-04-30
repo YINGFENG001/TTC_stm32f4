@@ -336,7 +336,7 @@
             <v6WtE>0</v6WtE>
             <v6Rtti>0</v6Rtti>
             <VariousControls>
-              <MiscControls></MiscControls>
+              <MiscControls>--no-multibyte-chars</MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
               <IncludePath>..\Libraries\CMSIS\Include;..\Libraries\CMSIS\Device\ST\STM32F4xx\Include;..\Libraries\STM32F4xx_HAL_Driver\Inc;..\User;..\User\led</IncludePath>
@@ -784,9 +784,24 @@
               <FilePath>..\User\stepper\bsp_stepper_T_speed.c</FilePath>
             </File>
             <File>
-              <FileName>bsp_stepper_usart_ctl.c</FileName>
+              <FileName>bsp_device_usart_ctl.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\User\stepper\bsp_stepper_usart_ctl.c</FilePath>
+              <FilePath>..\User\stepper\bsp_device_usart_ctl.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_gripper_uart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\gripper\bsp_gripper_uart.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_bus_servo.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\gripper\bsp_bus_servo.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_gripper.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\gripper\bsp_gripper.c</FilePath>
             </File>
           </Files>
         </Group>

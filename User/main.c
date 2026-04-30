@@ -21,7 +21,8 @@
 #include "./usart/bsp_debug_usart.h"
 #include "./delay/core_delay.h"
 #include "./stepper/bsp_stepper_init.h"
-#include "./stepper/bsp_stepper_usart_ctl.h"
+#include "./stepper/bsp_device_usart_ctl.h"
+#include "./gripper/bsp_bus_servo.h"
 #include "./key/bsp_exti.h"
 #include "./led/bsp_led.h"
 
@@ -37,6 +38,8 @@ int main(void)
 	SystemClock_Config();
 	/*初始化USART 配置模式为 115200 8-N-1，中断接收*/
 	DEBUG_USART_Config();
+	/*初始化夹爪检测串口 UART5: PC12(TX), PD2(RX), 1000000 8-N-1*/
+	BusServo_Init();
 	printf("欢迎使用野火 电机开发板 步进电机 加减速正反转 例程\r\n");
 	/*按键中断初始化*/
 	EXTI_Key_Config();	

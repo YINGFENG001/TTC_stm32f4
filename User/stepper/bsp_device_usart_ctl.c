@@ -1,11 +1,13 @@
 /**
   ******************************************************************************
-  * @file    bsp_stepper_usart_ctl.c
-  * @brief   双电机名称式串口任务分发（按设备输出轴机械单位输入）
+ * @file    bsp_device_usart_ctl.c
+ * @brief   多设备名称式串口命令分发（按设备输出轴机械单位输入）
   ******************************************************************************
   */
 
-#include "./stepper/bsp_stepper_usart_ctl.h"
+#include "./stepper/bsp_device_usart_ctl.h"
+#include "./gripper/bsp_bus_servo.h"
+#include "./gripper/bsp_gripper.h"
 
 typedef enum {
   DEVICE_MTOR1 = 0,
@@ -137,11 +139,13 @@ static const char *Stepper_ResultName(StepperCmdResult result)
   }
 }
 
+static void Clamp_PrintStatusFields(const BusServoStatus *status_data);
+
 static int Device_FindByName(const char *name)
 {
   uint8_t i;
 
-  for (i = 0; i < STEPPER_NUM; i++)
+  for (i = 0; i < DEVICE_NUM; i++)
   {
     if (strcmp(name, devices[i].name) == 0)
     {
@@ -318,12 +322,74 @@ void Device_ReportDone(void)
   }
 }
 
+static void Clamp_FillExtraStatus(uint8_t servo_id, BusServoStatus *status_data)
+{
+  uint8_t servo_error;
+  uint8_t servo_state;
+  int16_t servo_current;
+
+  if (status_data == 0)
+  {
+    return;
+  }
+
+  servo_error = 0;
+  servo_state = 0;
+  servo_current = 0;
+
+  if (BusServo_ReadServoState(servo_id, &servo_state, &servo_error) == BUS_SERVO_OK)
+  {
+    status_data->status = servo_state;
+  }
+
+  if (BusServo_ReadCurrent(servo_id, &servo_current, &servo_error) == BUS_SERVO_OK)
+  {
+    status_data->current = servo_current;
+  }
+}
+
 static void Device_PrintStatus(uint8_t id)
 {
+  BusServoStatus clamp_status;
+  BusServoResult clamp_result;
+  uint8_t servo_error;
+
   Device_Task();
 
   if (id >= DEVICE_NUM)
   {
+    return;
+  }
+
+  if (devices[id].type == DEVICE_TYPE_SERVO)
+  {
+    servo_error = 0;
+    clamp_result = BusServo_ReadStatus(GRIPPER_SERVO_ID_DEFAULT, &clamp_status, &servo_error);
+    if (clamp_result == BUS_SERVO_OK)
+    {
+      Clamp_FillExtraStatus(GRIPPER_SERVO_ID_DEFAULT, &clamp_status);
+      devices[id].enabled = TRUE;
+      devices[id].position = clamp_status.position;
+      devices[id].target = clamp_status.position;
+      devices[id].value = clamp_status.status;
+      devices[id].error_code = 0;
+      devices[id].state = DEV_IDLE;
+
+      printf("\n\rclamp status id=%u result=ok", GRIPPER_SERVO_ID_DEFAULT);
+      Clamp_PrintStatusFields(&clamp_status);
+    }
+    else
+    {
+      devices[id].state = DEV_ERROR;
+      devices[id].error_code = clamp_result;
+      printf("\n\rclamp status id=%u result=%s",
+             GRIPPER_SERVO_ID_DEFAULT,
+             BusServo_ResultName(clamp_result));
+      if (servo_error != 0)
+      {
+        printf(" servo_err=0x%02X", servo_error);
+      }
+    }
     return;
   }
 
@@ -338,7 +404,7 @@ static void Device_PrintAllStatus(void)
 {
   uint8_t i;
 
-  for (i = 0; i < STEPPER_NUM; i++)
+  for (i = 0; i < DEVICE_NUM; i++)
   {
     Device_PrintStatus(i);
   }
@@ -383,18 +449,25 @@ static void Stepper_PrintLimit(uint8_t motor_id)
 static void ShowCommandHelp(void)
 {
   printf("\n\r命令说明:");
-  printf("\n\r  mtor1 turn [rev]");
-  printf("\n\r  mtor1 move [rev] [accel] [decel] [rpm]");
-  printf("\n\r  mtor1 accel [value]");
-  printf("\n\r  mtor1 decel [value]");
-  printf("\n\r  mtor1 rpm [value]");
-  printf("\n\r  mtor2 turn [rev]");
-  printf("\n\r  mtor2 move [rev] [accel] [decel] [rpm]");
-  printf("\n\r  mtor2 accel [value]");
-  printf("\n\r  mtor2 decel [value]");
-  printf("\n\r  mtor2 rpm [value]");
-  printf("\n\r  status  查看全部设备状态");
-  printf("\n\r示例: mtor1 move 50 100 100 100  -> 5圈, 100rpm/s, 100rpm/s, 100rpm");
+  printf("\n\r  mtor1 turn [rev: -10000~10000(0.1圈)]");
+  printf("\n\r  mtor1 move [rev: -10000~10000(0.1圈)] [accel: 60~500(rpm/s)] [decel: 60~500(rpm/s)] [rpm: 1~600]");
+  printf("\n\r  mtor1 accel [value: 60~500(rpm/s)]");
+  printf("\n\r  mtor1 decel [value: 60~500(rpm/s)]");
+  printf("\n\r  mtor1 rpm [value: 1~600]");
+  printf("\n\r  mtor2 turn [rev: -10000~10000(0.1圈)]");
+  printf("\n\r  mtor2 move [rev: -10000~10000(0.1圈)] [accel: 60~500(rpm/s)] [decel: 60~500(rpm/s)] [rpm: 1~600]");
+  printf("\n\r  mtor2 accel [value: 60~500(rpm/s)]");
+  printf("\n\r  mtor2 decel [value: 60~500(rpm/s)]");
+  printf("\n\r  mtor2 rpm [value: 1~600]");
+  printf("\n\r  clamp ping [id: 0~253]");
+  printf("\n\r  clamp status [id: 0~253]");
+  printf("\n\r  clamp open [speed: 1~3000]");
+  printf("\n\r  clamp close [speed: 1~3000]");
+  printf("\n\r  clamp move [position: 800~2048] [speed: 1~3000]");
+  printf("\n\r  clamp grip [load: 100~900(0.1%%)] [speed: 1~3000] [step: 5~100]");
+  printf("\n\r  clamp release [delta: 20~400] [speed: 100~1000]");
+  printf("\n\r  status");
+  printf("\n\r示例: mtor1 move 50 100 100 100  -> 5.0圈, 100rpm/s, 100rpm/s, 100rpm");
   printf("\n\r");
 }
 
@@ -402,15 +475,19 @@ void ShowHelp(void)
 {
   Stepper_ApplyMechanicalConfig();
 
-  printf("\n\r——————————————双电机参数概览——————————————");
+  printf("\n\r================ 设备概览 ================");
   printf("\n\r设备:");
   printf("\n\r  mtor1 : 电机0 ENA PE0, DIR PE1, PUL PI5(TIM8_CH1)");
   printf("\n\r  mtor2 : 电机1 ENA PE4, DIR PI8, PUL PI6(TIM8_CH2)");
+  printf("\n\r  clamp : 夹爪舵机 UART5 TX PC12, RX PD2, 默认 id=10");
   printf("\n\r单位说明:");
-  printf("\n\r  1rev = 0.1圈，默认值为50（5圈），范围为-10000~10000（-1000圈~1000圈）");
-  printf("\n\r  1accel = 1rpm/s，默认值为100，范围为60~500");
-  printf("\n\r  1decel = 1rpm/s，默认值为100，范围为60~500");
-  printf("\n\r  1rpm = 1rpm，默认值为100，范围为1~600");
+  printf("\n\r  mtor rev   = 0.1圈，默认 50 = 5.0圈，范围 -10000~10000");
+  printf("\n\r  mtor accel = 1rpm/s，默认 100，范围 60~500");
+  printf("\n\r  mtor decel = 1rpm/s，默认 100，范围 60~500");
+  printf("\n\r  mtor rpm   = 1rpm，默认 100，范围 1~600");
+  printf("\n\r  clamp position = 800~2048");
+  printf("\n\r  clamp load     = 0.1%%");
+  printf("\n\r  clamp current  = 6.5mA");
   printf("\n\r输入 ? 查看命令说明，输入 status 查看全部设备状态\n\r");
 }
 
@@ -532,7 +609,7 @@ static void Stepper_Command(uint8_t device_id, int argc, char *argv[])
     return;
   }
 
-  /* 查询类命令：统一打印全部设备状态 */
+  /* 查询类命令：打印该设备当前状态、默认参数和安全范围 */
   if (strcmp(argv[1], "status") == 0)
   {
     Device_PrintStatus(device_id);
@@ -541,7 +618,7 @@ static void Stepper_Command(uint8_t device_id, int argc, char *argv[])
     return;
   }
 
-  /* 运动类命令：更新目标参数，完成范围校验后启动电机 */
+  /* 运动类命令：更新目标参数，完成范围校验后再启动电机 */
   if ((strcmp(argv[1], "turn") == 0) || (strcmp(argv[1], "move") == 0))
   {
     if ((strcmp(argv[1], "turn") == 0 && argc != 3) ||
@@ -643,6 +720,324 @@ static void Stepper_Command(uint8_t device_id, int argc, char *argv[])
   printf("\n\r%s unknown action: %s", devices[device_id].name, argv[1]);
 }
 
+static uint8_t Clamp_ParseServoId(int argc, char *argv[], uint8_t default_id)
+{
+  int id;
+
+  if (argc < 3)
+  {
+    return default_id;
+  }
+
+  id = atoi(argv[2]);
+  if ((id < 0) || (id > 253))
+  {
+    return default_id;
+  }
+
+  return (uint8_t)id;
+}
+
+static void Clamp_PrintResult(const char *action, uint8_t servo_id,
+                              BusServoResult result, uint8_t servo_error)
+{
+  printf("\n\rclamp %s id=%u result=%s",
+         action,
+         servo_id,
+         BusServo_ResultName(result));
+  if (servo_error != 0)
+  {
+    printf(" servo_err=0x%02X", servo_error);
+  }
+}
+
+static uint16_t Clamp_ParseSpeed(int argc, char *argv[], int index)
+{
+  int speed;
+
+  if (argc <= index)
+  {
+    return GRIPPER_SPEED_DEFAULT;
+  }
+
+  speed = atoi(argv[index]);
+  if (speed < 0)
+  {
+    return 0;
+  }
+
+  return (uint16_t)speed;
+}
+
+static void Clamp_PrintStateBits(uint8_t state)
+{
+  if (state == 0)
+  {
+    return;
+  }
+
+  printf(" voltage_err=%u encoder_err=%u temp_err=%u current_err=%u load_err=%u",
+         (state & 0x01) ? 1 : 0,
+         (state & 0x02) ? 1 : 0,
+         (state & 0x04) ? 1 : 0,
+         (state & 0x08) ? 1 : 0,
+         (state & 0x20) ? 1 : 0);
+}
+
+static void Clamp_PrintStatusFields(const BusServoStatus *status_data)
+{
+  int32_t current_ma_x10;
+  int32_t current_ma_abs_x10;
+  int32_t load_abs_x10;
+
+  current_ma_x10 = (int32_t)status_data->current * 65;
+  current_ma_abs_x10 = (current_ma_x10 < 0) ? -current_ma_x10 : current_ma_x10;
+  load_abs_x10 = (status_data->load < 0) ? -(int32_t)status_data->load : (int32_t)status_data->load;
+  printf(" pos=%d speed=%d load=%d(%s%ld.%ld%%) voltage=%u.%uV temp=%u current=%d(%s%ld.%ldmA) state=0x%02X",
+         (int)status_data->position,
+         (int)status_data->speed,
+         (int)status_data->load,
+         (status_data->load < 0) ? "-" : "",
+         (long)(load_abs_x10 / 10),
+         (long)(load_abs_x10 % 10),
+         status_data->voltage / 10,
+         status_data->voltage % 10,
+         status_data->temperature,
+         (int)status_data->current,
+         (current_ma_x10 < 0) ? "-" : "",
+         (long)(current_ma_abs_x10 / 10),
+         (long)(current_ma_abs_x10 % 10),
+         status_data->status);
+  Clamp_PrintStateBits(status_data->status);
+  printf("\n\r");
+}
+
+static void Clamp_PrintMoveResult(const char *action, uint8_t servo_id,
+                                  uint16_t position, uint16_t speed,
+                                  GripperResult result, BusServoResult servo_result,
+                                  const BusServoStatus *status_data)
+{
+  printf("\n\rclamp %s id=%u target=%u speed=%u result=%s",
+         action,
+         servo_id,
+         position,
+         speed,
+         Gripper_ResultName(result));
+  if ((result == GRIPPER_SERVO_ERROR) ||
+      (result == GRIPPER_TORQUE_OFF_ERROR) ||
+      (result == GRIPPER_TORQUE_ON_ERROR) ||
+      (result == GRIPPER_MOVE_ERROR) ||
+      (result == GRIPPER_STATUS_ERROR))
+  {
+    printf(" servo_result=%s", BusServo_ResultName(servo_result));
+  }
+  if (status_data != 0)
+  {
+    Clamp_PrintStatusFields(status_data);
+  }
+  printf("\n\r");
+}
+
+static void Clamp_Command(uint8_t device_id, int argc, char *argv[])
+{
+  uint8_t servo_id;
+  uint8_t servo_error;
+  BusServoResult result;
+  BusServoResult servo_result;
+  BusServoStatus status_data;
+  BusServoStatus final_status;
+  GripperResult gripper_result;
+  uint16_t position;
+  uint16_t speed;
+  uint16_t load_threshold;
+  uint16_t step;
+  uint16_t delta;
+  uint16_t target_pos;
+  int16_t cur_pos;
+
+  if (argc < 2)
+  {
+    printf("\n\r%s missing action", devices[device_id].name);
+    return;
+  }
+
+  memset(&final_status, 0, sizeof(final_status));
+  servo_id = GRIPPER_SERVO_ID_DEFAULT;
+  servo_error = 0;
+
+  /* 基础通讯命令：优先支持 ping/status，便于现场快速检查接线和反馈。 */
+  if (strcmp(argv[1], "ping") == 0)
+  {
+    servo_id = Clamp_ParseServoId(argc, argv, GRIPPER_SERVO_ID_DEFAULT);
+    result = BusServo_Ping(servo_id, &servo_error);
+    Clamp_PrintResult("ping", servo_id, result, servo_error);
+    printf("\n\r");
+
+    if (result == BUS_SERVO_OK)
+    {
+      devices[device_id].state = DEV_IDLE;
+      devices[device_id].error_code = 0;
+    }
+    else
+    {
+      devices[device_id].state = DEV_ERROR;
+      devices[device_id].error_code = result;
+    }
+    return;
+  }
+
+  if (strcmp(argv[1], "status") == 0)
+  {
+    servo_id = Clamp_ParseServoId(argc, argv, GRIPPER_SERVO_ID_DEFAULT);
+    result = BusServo_ReadStatus(servo_id, &status_data, &servo_error);
+    Clamp_PrintResult("status", servo_id, result, servo_error);
+
+    if (result == BUS_SERVO_OK)
+    {
+      Clamp_FillExtraStatus(servo_id, &status_data);
+      devices[device_id].state = (status_data.moving != 0) ? DEV_RUNNING : DEV_IDLE;
+      devices[device_id].position = status_data.position;
+      devices[device_id].value = status_data.status;
+      devices[device_id].error_code = 0;
+
+      Clamp_PrintStatusFields(&status_data);
+      printf("\n\r");
+    }
+    else
+    {
+      devices[device_id].state = DEV_ERROR;
+      devices[device_id].error_code = result;
+      printf("\n\r");
+    }
+    return;
+  }
+
+  /* 位置类命令：open/close/move 都走反馈式运动，并在持续堵转时由底层卸力停机。 */
+  if (strcmp(argv[1], "open") == 0)
+  {
+    speed = Clamp_ParseSpeed(argc, argv, 2);
+    gripper_result = Gripper_MoveFeedback(servo_id, GRIPPER_POS_OPEN_MAX, speed, &final_status, &servo_result);
+    Clamp_PrintMoveResult("open", servo_id, GRIPPER_POS_OPEN_MAX, speed, gripper_result, servo_result, &final_status);
+
+    devices[device_id].target = GRIPPER_POS_OPEN_MAX;
+    devices[device_id].error_code = (gripper_result == GRIPPER_OK) ? 0 : gripper_result;
+    devices[device_id].state = (gripper_result == GRIPPER_OK) ? DEV_IDLE : DEV_ERROR;
+    return;
+  }
+
+  if (strcmp(argv[1], "close") == 0)
+  {
+    speed = Clamp_ParseSpeed(argc, argv, 2);
+    gripper_result = Gripper_MoveFeedback(servo_id, GRIPPER_POS_CLOSE_MIN, speed, &final_status, &servo_result);
+    Clamp_PrintMoveResult("close", servo_id, GRIPPER_POS_CLOSE_MIN, speed, gripper_result, servo_result, &final_status);
+
+    devices[device_id].target = GRIPPER_POS_CLOSE_MIN;
+    devices[device_id].error_code = (gripper_result == GRIPPER_OK) ? 0 : gripper_result;
+    devices[device_id].state = (gripper_result == GRIPPER_OK) ? DEV_IDLE : DEV_ERROR;
+    return;
+  }
+
+  if (strcmp(argv[1], "move") == 0)
+  {
+    if (argc < 3)
+    {
+      printf("\n\rclamp move param_error");
+      return;
+    }
+
+    if (atoi(argv[2]) < 0)
+    {
+      printf("\n\rclamp move range_error");
+      return;
+    }
+
+    position = (uint16_t)atoi(argv[2]);
+    speed = Clamp_ParseSpeed(argc, argv, 3);
+    gripper_result = Gripper_MoveFeedback(servo_id, position, speed, &final_status, &servo_result);
+    Clamp_PrintMoveResult("move", servo_id, position, speed, gripper_result, servo_result, &final_status);
+
+    devices[device_id].target = position;
+    devices[device_id].error_code = (gripper_result == GRIPPER_OK) ? 0 : gripper_result;
+    devices[device_id].state = (gripper_result == GRIPPER_OK) ? DEV_IDLE : DEV_ERROR;
+    return;
+  }
+
+  /* 夹持类命令：grip 通过逐步闭合和负载阈值判断建立夹持，不主动卸力。 */
+  if (strcmp(argv[1], "grip") == 0)
+  {
+    load_threshold = (argc >= 3) ? (uint16_t)atoi(argv[2]) : GRIPPER_GRIP_LOAD_DEFAULT;
+    speed = Clamp_ParseSpeed(argc, argv, 3);
+    step = (argc >= 5) ? (uint16_t)atoi(argv[4]) : GRIPPER_GRIP_STEP_DEFAULT;
+
+    gripper_result = Gripper_Grip(servo_id, load_threshold, speed, step, &final_status, &servo_result);
+    printf("\n\rclamp grip id=%u load=%u speed=%u step=%u result=%s",
+           servo_id,
+           load_threshold,
+           speed,
+           step,
+           Gripper_ResultName(gripper_result));
+    if ((gripper_result == GRIPPER_MOVE_ERROR) || (gripper_result == GRIPPER_STATUS_ERROR))
+    {
+      printf(" servo_result=%s", BusServo_ResultName(servo_result));
+    }
+    if (gripper_result != GRIPPER_RANGE_ERROR)
+    {
+      Clamp_PrintStatusFields(&final_status);
+    }
+
+    if (gripper_result != GRIPPER_RANGE_ERROR)
+    {
+      devices[device_id].position = final_status.position;
+      devices[device_id].target = final_status.position;
+    }
+    devices[device_id].error_code = (gripper_result == GRIPPER_OK) ? 0 : gripper_result;
+    devices[device_id].state = (gripper_result == GRIPPER_OK) ? DEV_IDLE : DEV_ERROR;
+    return;
+  }
+
+  /* 松开类命令：release 先卸力、读位置，再重新上扭矩退开一点。 */
+  if (strcmp(argv[1], "release") == 0)
+  {
+    delta = (argc >= 3) ? (uint16_t)atoi(argv[2]) : GRIPPER_RELEASE_DELTA_DEFAULT;
+    speed = (argc >= 4) ? (uint16_t)atoi(argv[3]) : GRIPPER_RELEASE_SPEED_DEFAULT;
+    cur_pos = 0;
+    target_pos = 0;
+
+    gripper_result = Gripper_Release(servo_id, delta, speed, &cur_pos, &target_pos, &final_status, &servo_result);
+    printf("\n\rclamp release id=%u cur=%d target=%u delta=%u speed=%u result=%s",
+           servo_id,
+           (int)cur_pos,
+           target_pos,
+           delta,
+           speed,
+           Gripper_ResultName(gripper_result));
+    if ((gripper_result == GRIPPER_MOVE_ERROR) ||
+        (gripper_result == GRIPPER_STATUS_ERROR) ||
+        (gripper_result == GRIPPER_TORQUE_OFF_ERROR) ||
+        (gripper_result == GRIPPER_TORQUE_ON_ERROR))
+    {
+      printf(" servo_result=%s", BusServo_ResultName(servo_result));
+    }
+    if ((gripper_result == GRIPPER_OK) ||
+        (gripper_result == GRIPPER_STALL) ||
+        (gripper_result == GRIPPER_TIMEOUT))
+    {
+      Clamp_PrintStatusFields(&final_status);
+    }
+
+    if (gripper_result != GRIPPER_RANGE_ERROR)
+    {
+      devices[device_id].position = final_status.position;
+      devices[device_id].target = target_pos;
+    }
+    devices[device_id].error_code = (gripper_result == GRIPPER_OK) ? 0 : gripper_result;
+    devices[device_id].state = (gripper_result == GRIPPER_OK) ? DEV_IDLE : DEV_ERROR;
+    return;
+  }
+
+  printf("\n\r%s unknown action: %s", devices[device_id].name, argv[1]);
+}
+
 static void Placeholder_Command(uint8_t device_id, int argc, char *argv[])
 {
   if ((argc >= 2) && (strcmp(argv[1], "status") == 0))
@@ -674,6 +1069,7 @@ static void Command_Dispatch(char *line)
     return;
   }
 
+  /* 特殊入口命令：? 打印帮助，status 打印全部设备状态。 */
   if (strcmp(argv[0], "?") == 0)
   {
     ShowCommandHelp();
@@ -697,6 +1093,7 @@ static void Command_Dispatch(char *line)
     return;
   }
 
+  /* 统一按设备类型分发到对应处理函数，后续新增末端设备时从这里扩展。 */
   switch (devices[device_id].type)
   {
     case DEVICE_TYPE_STEPPER:
@@ -704,6 +1101,9 @@ static void Command_Dispatch(char *line)
       break;
 
     case DEVICE_TYPE_SERVO:
+      Clamp_Command((uint8_t)device_id, argc, argv);
+      break;
+
     case DEVICE_TYPE_VACUM:
       Placeholder_Command((uint8_t)device_id, argc, argv);
       break;
