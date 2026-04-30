@@ -39,6 +39,7 @@ typedef struct {
   uint16_t en_pin;        /* 使能控制GPIO引脚 */
   GPIO_TypeDef *pul_port; /* 脉冲输出GPIO端口 */
   uint16_t pul_pin;       /* 脉冲输出GPIO引脚 */
+  uint8_t dir_inverted;   /* 方向是否反相：1表示输出电平取反 */
   uint32_t pul_channel;   /* TIM8 输出比较通道 */
   uint32_t pul_it;        /* TIM8 对应比较中断源 */
   uint32_t pul_flag;      /* TIM8 对应比较标志位 */

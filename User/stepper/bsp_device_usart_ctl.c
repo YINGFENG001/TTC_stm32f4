@@ -451,11 +451,13 @@ static void ShowCommandHelp(void)
   printf("\n\r命令说明:");
   printf("\n\r  mtor1 turn [rev: -10000~10000(0.1圈)]");
   printf("\n\r  mtor1 move [rev: -10000~10000(0.1圈)] [accel: 60~500(rpm/s)] [decel: 60~500(rpm/s)] [rpm: 1~600]");
+  printf("\n\r  mtor1 stop");
   printf("\n\r  mtor1 accel [value: 60~500(rpm/s)]");
   printf("\n\r  mtor1 decel [value: 60~500(rpm/s)]");
   printf("\n\r  mtor1 rpm [value: 1~600]");
   printf("\n\r  mtor2 turn [rev: -10000~10000(0.1圈)]");
   printf("\n\r  mtor2 move [rev: -10000~10000(0.1圈)] [accel: 60~500(rpm/s)] [decel: 60~500(rpm/s)] [rpm: 1~600]");
+  printf("\n\r  mtor2 stop");
   printf("\n\r  mtor2 accel [value: 60~500(rpm/s)]");
   printf("\n\r  mtor2 decel [value: 60~500(rpm/s)]");
   printf("\n\r  mtor2 rpm [value: 1~600]");
@@ -485,6 +487,7 @@ void ShowHelp(void)
   printf("\n\r  mtor accel = 1rpm/s，默认 100，范围 60~500");
   printf("\n\r  mtor decel = 1rpm/s，默认 100，范围 60~500");
   printf("\n\r  mtor rpm   = 1rpm，默认 100，范围 1~600");
+  printf("\n\r  mtor stop  = 立即停止当前运动并保持当前位置");
   printf("\n\r  clamp position = 800~2048");
   printf("\n\r  clamp load     = 0.1%%");
   printf("\n\r  clamp current  = 6.5mA");
@@ -527,6 +530,12 @@ static void Stepper_PrintStartResult(uint8_t motor_id, StepperCmdResult result)
            (unsigned long)stepper_cfg[motor_id].param.decel_rpm_s,
            (unsigned long)stepper_cfg[motor_id].param.rpm);
   }
+}
+
+static void Stepper_PrintStopResult(uint8_t motor_id, StepperCmdResult result)
+{
+  printf("\n\r%s stop %s rev=", devices[motor_id].name, Stepper_ResultName(result));
+  PrintFixed1Signed(devices[motor_id].position);
 }
 
 static uint8_t Stepper_CheckUserRange(uint8_t motor_id, const StepperParam *param)
@@ -615,6 +624,22 @@ static void Stepper_Command(uint8_t device_id, int argc, char *argv[])
     Device_PrintStatus(device_id);
     Stepper_PrintParam(motor_id);
     Stepper_PrintLimit(motor_id);
+    return;
+  }
+
+  if (strcmp(argv[1], "stop") == 0)
+  {
+    if (argc != 2)
+    {
+      printf("\n\r%s stop param_error", devices[device_id].name);
+      return;
+    }
+
+    Device_Task();
+    result = Stepper_Stop(motor_id);
+    devices[device_id].target = devices[device_id].position;
+    devices[device_id].state = DEV_IDLE;
+    Stepper_PrintStopResult(motor_id, result);
     return;
   }
 

@@ -58,6 +58,7 @@ void speed_decision(uint8_t motor_id);
 void MSD_ENA(FunctionalState NewState);
 void Stepper_SetMotorPulsesPerRev(uint8_t motor_id, uint32_t pulses_per_rev);
 StepperCmdResult stepper_move_T(uint8_t motor_id, int32_t step, uint32_t accel, uint32_t decel, uint32_t speed);
+StepperCmdResult Stepper_Stop(uint8_t motor_id);
 uint8_t Stepper_IsAnyRunning(void);
 
 #endif

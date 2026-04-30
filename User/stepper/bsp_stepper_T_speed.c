@@ -76,6 +76,16 @@ static void Stepper_UpdateGlobalStatus(void)
   }
 }
 
+static uint8_t Stepper_GetDirLevel(uint8_t motor_id, uint8_t logic_dir)
+{
+  if (stepper_hw[motor_id].dir_inverted != 0)
+  {
+    return (uint8_t)(logic_dir ? 0 : 1);
+  }
+
+  return logic_dir;
+}
+
 /**
   * @brief  根据运动方向判断步进电机的运行位置
   * @param  motor_id 电机编号
@@ -128,6 +138,32 @@ void MSD_ENA(FunctionalState NewState)
   {
     printf("\n\r驱动器禁止输出，两路电机均为脱机状态");
   }
+}
+
+StepperCmdResult Stepper_Stop(uint8_t motor_id)
+{
+  if (!STEPPER_ID_VALID(motor_id))
+  {
+    return STEPPER_CMD_ID_ERROR;
+  }
+
+  /* 立即关闭当前通道输出与中断，保证中途停机不会继续追目标。 */
+  TIM_CCxChannelCmd(MOTOR_PUL_TIM, stepper_hw[motor_id].pul_channel, TIM_CCx_DISABLE);
+  __HAL_TIM_DISABLE_IT(&TIM_TimeBaseStructure, stepper_hw[motor_id].pul_it);
+  __HAL_TIM_CLEAR_IT(&TIM_TimeBaseStructure, stepper_hw[motor_id].pul_it);
+
+  srd[motor_id].run_state = STOP;
+  srd[motor_id].step_delay = 0;
+  srd[motor_id].accel_count = 0;
+  motor_status[motor_id].running = FALSE;
+  Stepper_UpdateGlobalStatus();
+
+  if (Stepper_IsAnyRunning() != TRUE)
+  {
+    __HAL_TIM_DISABLE(&TIM_TimeBaseStructure);
+  }
+
+  return STEPPER_CMD_OK;
 }
 
 /*! \brief 以给定的步数移动步进电机
@@ -192,7 +228,7 @@ StepperCmdResult stepper_move_T(uint8_t motor_id, int32_t step, uint32_t accel, 
     srd[motor_id].dir = CW;
   }
 
-  MOTOR_DIR(motor_id, srd[motor_id].dir);
+  MOTOR_DIR(motor_id, Stepper_GetDirLevel(motor_id, srd[motor_id].dir));
 
   /* 4. 初始化运行状态机，计算加速段、匀速段和减速段参数 */
   if (step == 1)
