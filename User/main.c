@@ -23,6 +23,7 @@
 #include "./stepper/bsp_stepper_init.h"
 #include "./stepper/bsp_device_usart_ctl.h"
 #include "./gripper/bsp_bus_servo.h"
+#include "./vacum/bsp_evs08.h"
 #include "./key/bsp_exti.h"
 #include "./led/bsp_led.h"
 
@@ -40,7 +41,7 @@ int main(void)
 	DEBUG_USART_Config();
 	/*初始化夹爪检测串口 UART5: PC12(TX), PD2(RX), 1000000 8-N-1*/
 	BusServo_Init();
-	printf("欢迎使用野火 电机开发板 步进电机 加减速正反转 例程\r\n");
+	Evs08_Init();
 	/*按键中断初始化*/
 	EXTI_Key_Config();	
 	/*led初始化*/

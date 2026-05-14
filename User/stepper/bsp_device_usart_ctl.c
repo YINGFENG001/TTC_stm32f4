@@ -8,6 +8,7 @@
 #include "./stepper/bsp_device_usart_ctl.h"
 #include "./gripper/bsp_bus_servo.h"
 #include "./gripper/bsp_gripper.h"
+#include "./vacum/bsp_evs08.h"
 
 typedef enum {
   DEVICE_MTOR1 = 0,
@@ -87,8 +88,8 @@ typedef struct {
 static EndDevice devices[DEVICE_NUM] = {
   {DEVICE_MTOR1, "mtor1", DEVICE_TYPE_STEPPER, DEV_IDLE,      TRUE, 0, 0, 0, 0},
   {DEVICE_MTOR2, "mtor2", DEVICE_TYPE_STEPPER, DEV_IDLE,      TRUE, 0, 0, 0, 0},
-  {DEVICE_CLAMP, "clamp", DEVICE_TYPE_SERVO,   DEV_NOT_READY, TRUE, 0, 0, 0, 0},
-  {DEVICE_VACUM, "vacum", DEVICE_TYPE_VACUM,   DEV_NOT_READY, TRUE, 0, 0, 0, 0}
+  {DEVICE_CLAMP, "clamp", DEVICE_TYPE_SERVO,   DEV_IDLE,      TRUE, 0, 0, 0, 0},
+  {DEVICE_VACUM, "vacum", DEVICE_TYPE_VACUM,   DEV_IDLE,      TRUE, 0, 0, 0, 0}
 };
 
 static StepperDeviceConfig stepper_cfg[STEPPER_NUM] = {
@@ -140,6 +141,8 @@ static const char *Stepper_ResultName(StepperCmdResult result)
 }
 
 static void Clamp_PrintStatusFields(const BusServoStatus *status_data);
+static void Vacum_Command(uint8_t device_id, int argc, char *argv[]);
+static void Device_PrintFullStatus(void);
 
 static int Device_FindByName(const char *name)
 {
@@ -400,27 +403,6 @@ static void Device_PrintStatus(uint8_t id)
   printf(" err=%lu", (unsigned long)devices[id].error_code);
 }
 
-static void Device_PrintAllStatus(void)
-{
-  uint8_t i;
-
-  for (i = 0; i < DEVICE_NUM; i++)
-  {
-    Device_PrintStatus(i);
-  }
-  printf("\n\r");
-}
-
-static void Stepper_PrintDefault(uint8_t motor_id)
-{
-  printf("\n\r%s default rev=", devices[motor_id].name);
-  PrintFixed1Signed(stepper_cfg[motor_id].param.rev_0p1);
-  printf(" accel=%lurpm/s decel=%lurpm/s rpm=%lurpm",
-         (unsigned long)stepper_cfg[motor_id].param.accel_rpm_s,
-         (unsigned long)stepper_cfg[motor_id].param.decel_rpm_s,
-         (unsigned long)stepper_cfg[motor_id].param.rpm);
-}
-
 static void Stepper_PrintLimit(uint8_t motor_id)
 {
   const StepperMechanicalConfig *mech;
@@ -468,6 +450,11 @@ static void ShowCommandHelp(void)
   printf("\n\r  clamp move [position: 800~2048] [speed: 1~3000]");
   printf("\n\r  clamp grip [load: 100~900(0.1%%)] [speed: 1~3000] [step: 5~100]");
   printf("\n\r  clamp release [delta: 20~400] [speed: 100~1000]");
+  printf("\n\r  vacum set [min_vac:0~100(%%)] [max_vac:0~100(%%)] [timeout:1~255(100ms)]");
+  printf("\n\r  vacum grip");
+  printf("\n\r  vacum release");
+  printf("\n\r  vacum stop");
+  printf("\n\r  vacum status");
   printf("\n\r  status");
   printf("\n\r示例: mtor1 move 50 100 100 100  -> 5.0圈, 100rpm/s, 100rpm/s, 100rpm");
   printf("\n\r");
@@ -479,19 +466,25 @@ void ShowHelp(void)
 
   printf("\n\r================ 设备概览 ================");
   printf("\n\r设备:");
-  printf("\n\r  mtor1 : 电机0 ENA PE0, DIR PE1, PUL PI5(TIM8_CH1)");
-  printf("\n\r  mtor2 : 电机1 ENA PE4, DIR PI8, PUL PI6(TIM8_CH2)");
-  printf("\n\r  clamp : 夹爪舵机 UART5 TX PC12, RX PD2, 默认 id=10");
-  printf("\n\r单位说明:");
-  printf("\n\r  mtor rev   = 0.1圈，默认 50 = 5.0圈，范围 -10000~10000");
-  printf("\n\r  mtor accel = 1rpm/s，默认 100，范围 60~500");
-  printf("\n\r  mtor decel = 1rpm/s，默认 100，范围 60~500");
-  printf("\n\r  mtor rpm   = 1rpm，默认 100，范围 1~600");
-  printf("\n\r  mtor stop  = 立即停止当前运动并保持当前位置");
+  printf("\n\r  mtor1 : 步进电机0 ENA PE0, DIR PE1, PUL PI5(TIM8_CH1)");
+  printf("\n\r  mtor2 : 步进电机1 ENA PE4, DIR PI8, PUL PI6(TIM8_CH2)");
+  printf("\n\r  clamp : 玄雅STS舵机夹爪  TX PC12, RX PD2(UART5), id=10");
+  printf("\n\r  vacum : 钧舵EVS08真空吸盘 TX PC10, RX PC11(UART4, RS485), DE/RE PH9, id=9");
+  printf("\n\r参数说明:");
+  printf("\n\r  mtor rev   = -10000~10000(0.1圈)，默认 50 = 5.0圈");
+  printf("\n\r       accel = 60~500(rpm/s)，默认 100");
+  printf("\n\r       decel = 60~500(rpm/s)，默认 100");
+  printf("\n\r       rpm   = 1~600(rpm)，默认 100");
+  printf("\n\r       stop  = 立即停止当前运动并保持当前位置");
   printf("\n\r  clamp position = 800~2048");
-  printf("\n\r  clamp load     = 0.1%%");
-  printf("\n\r  clamp current  = 6.5mA");
-  printf("\n\r输入 ? 查看命令说明，输入 status 查看全部设备状态\n\r");
+  printf("\n\r        load     = 0.1%%");
+  printf("\n\r        current  = 6.5mA");
+  printf("\n\r  vacum min/max_vac = 真空度(%%)");
+  printf("\n\r        timeout     = 1~255(100ms)");
+	printf("\n\r        grip        = 真空吸取");
+	printf("\n\r        release     = 破真空停止");
+  printf("\n\r        stop        = 直接停止");
+  printf("\n\r输入 ? 查看详细命令说明，输入 status 查看全部设备状态\n\r");
 }
 
 static void Stepper_PrintParam(uint8_t motor_id)
@@ -1063,15 +1056,198 @@ static void Clamp_Command(uint8_t device_id, int argc, char *argv[])
   printf("\n\r%s unknown action: %s", devices[device_id].name, argv[1]);
 }
 
-static void Placeholder_Command(uint8_t device_id, int argc, char *argv[])
+static void Vacum_PrintStatusFields(const Evs08Status *status_data)
 {
-  if ((argc >= 2) && (strcmp(argv[1], "status") == 0))
+  printf(" state1=0x%04X state2=0x%04X fault=0x%04X busy1=%u busy2=%u obj1=%u obj2=%u vac1=%u%% vac2=%u%% temp=%u bus=%u.%uV",
+         status_data->ch1_status_reg,
+         status_data->ch2_status_reg,
+         status_data->fault_reg,
+         status_data->ch1_busy,
+         status_data->ch2_busy,
+         status_data->ch1_obj,
+         status_data->ch2_obj,
+         status_data->ch1_vac_percent,
+         status_data->ch2_vac_percent,
+         status_data->temperature,
+         status_data->bus_voltage_x10 / 10,
+         status_data->bus_voltage_x10 % 10);
+}
+
+static uint8_t Vacum_ParsePercent(char *text, uint8_t *value)
+{
+  int parsed;
+
+  if ((text == 0) || (value == 0))
   {
-    Device_PrintStatus(device_id);
+    return FALSE;
+  }
+
+  parsed = atoi(text);
+  if ((parsed < 0) || (parsed > 100))
+  {
+    return FALSE;
+  }
+
+  *value = (uint8_t)parsed;
+  return TRUE;
+}
+
+static uint8_t Vacum_ParseTimeout(char *text, uint8_t *value)
+{
+  int parsed;
+
+  if ((text == 0) || (value == 0))
+  {
+    return FALSE;
+  }
+
+  parsed = atoi(text);
+  if ((parsed < 1) || (parsed > 255))
+  {
+    return FALSE;
+  }
+
+  *value = (uint8_t)parsed;
+  return TRUE;
+}
+
+static void Vacum_PrintResult(const char *action, ModbusResult result)
+{
+  printf("\n\rvacum %s result=%s", action, Evs08_ResultName(result));
+}
+
+static void Vacum_Command(uint8_t device_id, int argc, char *argv[])
+{
+  uint8_t max_vac;
+  uint8_t min_vac;
+  uint8_t timeout;
+  ModbusResult result;
+  Evs08Status status_data;
+
+  if (argc < 2)
+  {
+    printf("\n\r%s missing action", devices[device_id].name);
     return;
   }
 
-  printf("\n\r%s not_ready", devices[device_id].name);
+  if (strcmp(argv[1], "set") == 0)
+  {
+    if (argc != 5)
+    {
+      printf("\n\rvacum set param_error");
+      return;
+    }
+
+    if ((Vacum_ParsePercent(argv[2], &min_vac) != TRUE) ||
+        (Vacum_ParsePercent(argv[3], &max_vac) != TRUE) ||
+        (Vacum_ParseTimeout(argv[4], &timeout) != TRUE))
+    {
+      printf("\n\rvacum set range_error min/max=0~100 timeout=1~255(100ms)");
+      return;
+    }
+
+    result = Evs08_SetParams(min_vac, max_vac, timeout);
+    Vacum_PrintResult("set", result);
+    if (result == MODBUS_OK)
+    {
+      printf(" min=%u%% max=%u%% timeout=%u(100ms)", min_vac, max_vac, timeout);
+      devices[device_id].state = DEV_IDLE;
+      devices[device_id].error_code = 0;
+    }
+    else
+    {
+      devices[device_id].state = DEV_ERROR;
+      devices[device_id].error_code = result;
+    }
+    return;
+  }
+
+  if (strcmp(argv[1], "grip") == 0)
+  {
+    if (argc != 2)
+    {
+      printf("\n\rvacum grip param_error");
+      return;
+    }
+
+    result = Evs08_Grip();
+    Vacum_PrintResult("grip", result);
+    devices[device_id].state = (result == MODBUS_OK) ? DEV_RUNNING : DEV_ERROR;
+    devices[device_id].error_code = (result == MODBUS_OK) ? 0 : result;
+    return;
+  }
+
+  if (strcmp(argv[1], "release") == 0)
+  {
+    if (argc != 2)
+    {
+      printf("\n\rvacum release param_error");
+      return;
+    }
+
+    result = Evs08_Release();
+    Vacum_PrintResult("release", result);
+    devices[device_id].state = (result == MODBUS_OK) ? DEV_IDLE : DEV_ERROR;
+    devices[device_id].error_code = (result == MODBUS_OK) ? 0 : result;
+    return;
+  }
+
+  if (strcmp(argv[1], "stop") == 0)
+  {
+    if (argc != 2)
+    {
+      printf("\n\rvacum stop param_error");
+      return;
+    }
+
+    result = Evs08_Stop();
+    Vacum_PrintResult("stop", result);
+    devices[device_id].state = (result == MODBUS_OK) ? DEV_IDLE : DEV_ERROR;
+    devices[device_id].error_code = (result == MODBUS_OK) ? 0 : result;
+    return;
+  }
+
+  if (strcmp(argv[1], "status") == 0)
+  {
+    if (argc != 2)
+    {
+      printf("\n\rvacum status param_error");
+      return;
+    }
+
+    result = Evs08_ReadStatus(&status_data);
+    Vacum_PrintResult("status", result);
+    if (result == MODBUS_OK)
+    {
+      Vacum_PrintStatusFields(&status_data);
+      devices[device_id].enabled = (status_data.ch1_enabled || status_data.ch2_enabled) ? TRUE : FALSE;
+      devices[device_id].value = status_data.ch1_status_reg;
+      devices[device_id].error_code = 0;
+      devices[device_id].state = (status_data.ch1_busy || status_data.ch2_busy) ? DEV_RUNNING : DEV_IDLE;
+    }
+    else
+    {
+      devices[device_id].state = DEV_ERROR;
+      devices[device_id].error_code = result;
+    }
+    return;
+  }
+
+  printf("\n\r%s unknown action: %s", devices[device_id].name, argv[1]);
+}
+
+static void Device_PrintFullStatus(void)
+{
+  char *mtor1_status[] = {"mtor1", "status"};
+  char *mtor2_status[] = {"mtor2", "status"};
+  char *clamp_status[] = {"clamp", "status"};
+  char *vacum_status[] = {"vacum", "status"};
+
+  Stepper_Command(DEVICE_MTOR1, 2, mtor1_status);
+  Stepper_Command(DEVICE_MTOR2, 2, mtor2_status);
+  Clamp_Command(DEVICE_CLAMP, 2, clamp_status);
+  Vacum_Command(DEVICE_VACUM, 2, vacum_status);
+  printf("\n\r");
 }
 
 static void Command_Dispatch(char *line)
@@ -1103,11 +1279,7 @@ static void Command_Dispatch(char *line)
 
   if (strcmp(argv[0], "status") == 0)
   {
-    Device_PrintAllStatus();
-    Stepper_PrintDefault(STEPPER_MOTOR_0);
-    Stepper_PrintDefault(STEPPER_MOTOR_1);
-    Stepper_PrintLimit(STEPPER_MOTOR_0);
-    Stepper_PrintLimit(STEPPER_MOTOR_1);
+    Device_PrintFullStatus();
     return;
   }
 
@@ -1130,7 +1302,7 @@ static void Command_Dispatch(char *line)
       break;
 
     case DEVICE_TYPE_VACUM:
-      Placeholder_Command((uint8_t)device_id, argc, argv);
+      Vacum_Command((uint8_t)device_id, argc, argv);
       break;
 
     default:

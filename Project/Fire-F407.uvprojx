@@ -803,6 +803,21 @@
               <FileType>1</FileType>
               <FilePath>..\User\gripper\bsp_gripper.c</FilePath>
             </File>
+            <File>
+              <FileName>bsp_rs485.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\rs485\bsp_rs485.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_modbus_rtu.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\vacum\bsp_modbus_rtu.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_evs08.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\vacum\bsp_evs08.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
