@@ -7,6 +7,19 @@
 #define BUS_SERVO_TX_TIMEOUT_MS             20
 #define BUS_SERVO_RX_TIMEOUT_MS             30
 
+#ifndef TRUE
+#define TRUE                                1
+#endif
+
+#ifndef FALSE
+#define FALSE                               0
+#endif
+
+static BusServoResult BusServo_RecvPacketChecked(uint8_t expected_id, uint8_t *params,
+                                                 uint8_t expected_param_len,
+                                                 uint8_t *servo_error,
+                                                 uint8_t fail_on_servo_error);
+
 static uint8_t BusServo_Checksum(uint8_t id, uint8_t length, uint8_t instruction, const uint8_t *params)
 {
   uint16_t sum;
@@ -57,6 +70,14 @@ static BusServoResult BusServo_SendPacket(uint8_t id, uint8_t instruction,
 
 static BusServoResult BusServo_RecvPacket(uint8_t expected_id, uint8_t *params,
                                           uint8_t expected_param_len, uint8_t *servo_error)
+{
+  return BusServo_RecvPacketChecked(expected_id, params, expected_param_len, servo_error, TRUE);
+}
+
+static BusServoResult BusServo_RecvPacketChecked(uint8_t expected_id, uint8_t *params,
+                                                 uint8_t expected_param_len,
+                                                 uint8_t *servo_error,
+                                                 uint8_t fail_on_servo_error)
 {
   uint8_t byte;
   uint8_t id;
@@ -132,7 +153,7 @@ static BusServoResult BusServo_RecvPacket(uint8_t expected_id, uint8_t *params,
     return BUS_SERVO_CHECKSUM_ERROR;
   }
 
-  if (recv_buf[0] != 0)
+  if ((recv_buf[0] != 0) && (fail_on_servo_error == TRUE))
   {
     return BUS_SERVO_STATUS_ERROR;
   }
@@ -211,7 +232,7 @@ BusServoResult BusServo_ReadData(uint8_t servo_id, uint8_t address, uint8_t len,
     return result;
   }
 
-  return BusServo_RecvPacket(servo_id, data, len, servo_error);
+  return BusServo_RecvPacketChecked(servo_id, data, len, servo_error, FALSE);
 }
 
 BusServoResult BusServo_WriteData(uint8_t servo_id, uint8_t address, const uint8_t *data,

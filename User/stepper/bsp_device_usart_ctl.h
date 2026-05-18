@@ -14,4 +14,76 @@ void DealSerialData(void);
 void Device_Task(void);
 void Device_ReportDone(void);
 
+typedef enum {
+  DEVICE_API_OK = 0,
+  DEVICE_API_BUSY,
+  DEVICE_API_DISABLED,
+  DEVICE_API_PARAM_ERROR,
+  DEVICE_API_RANGE_ERROR,
+  DEVICE_API_UART_ERROR,
+  DEVICE_API_TIMEOUT,
+  DEVICE_API_CRC_ERROR,
+  DEVICE_API_ID_ERROR,
+  DEVICE_API_DEVICE_ERROR
+} DeviceApiResult;
+
+typedef struct {
+  uint8_t enabled;
+  uint8_t running;
+  int32_t rev_0p1;
+  int32_t target_0p1;
+  uint32_t err;
+  uint32_t accel_rpm_s;
+  uint32_t decel_rpm_s;
+  uint32_t rpm;
+} DeviceStepperStatus;
+
+typedef struct {
+  uint8_t servo_id;
+  int16_t pos;
+  int16_t speed;
+  int16_t load;
+  uint8_t voltage;
+  uint8_t temp;
+  int16_t current;
+  uint8_t state;
+} DeviceClampStatus;
+
+typedef struct {
+  uint16_t state1;
+  uint16_t state2;
+  uint16_t fault;
+  uint8_t busy1;
+  uint8_t busy2;
+  uint8_t obj1;
+  uint8_t obj2;
+  uint8_t vac1;
+  uint8_t vac2;
+  uint8_t temp;
+  uint16_t bus_x10;
+} DeviceVacumStatus;
+
+DeviceApiResult DeviceApi_StepperStatus(uint8_t motor_id, DeviceStepperStatus *out);
+DeviceApiResult DeviceApi_StepperMove(uint8_t motor_id, int32_t rev_0p1,
+                                      uint32_t accel, uint32_t decel, uint32_t rpm);
+DeviceApiResult DeviceApi_StepperTurn(uint8_t motor_id, int32_t rev_0p1);
+DeviceApiResult DeviceApi_StepperStop(uint8_t motor_id, int32_t *rev_0p1);
+DeviceApiResult DeviceApi_StepperSetAccel(uint8_t motor_id, uint32_t accel);
+DeviceApiResult DeviceApi_StepperSetDecel(uint8_t motor_id, uint32_t decel);
+DeviceApiResult DeviceApi_StepperSetRpm(uint8_t motor_id, uint32_t rpm);
+void DeviceApi_BindStepperRosCmd(uint8_t motor_id, uint32_t id, const char *cmd);
+
+DeviceApiResult DeviceApi_ClampStatus(uint8_t servo_id, DeviceClampStatus *out);
+DeviceApiResult DeviceApi_ClampMove(uint16_t position, uint16_t speed, DeviceClampStatus *out);
+DeviceApiResult DeviceApi_ClampOpen(uint16_t speed, DeviceClampStatus *out);
+DeviceApiResult DeviceApi_ClampClose(uint16_t speed, DeviceClampStatus *out);
+DeviceApiResult DeviceApi_ClampGrip(uint16_t load, uint16_t speed, uint16_t step, DeviceClampStatus *out);
+DeviceApiResult DeviceApi_ClampRelease(uint16_t delta, uint16_t speed, DeviceClampStatus *out);
+
+DeviceApiResult DeviceApi_VacumSet(uint8_t min_vac, uint8_t max_vac, uint8_t timeout);
+DeviceApiResult DeviceApi_VacumGrip(void);
+DeviceApiResult DeviceApi_VacumRelease(void);
+DeviceApiResult DeviceApi_VacumStop(void);
+DeviceApiResult DeviceApi_VacumStatus(DeviceVacumStatus *out);
+
 #endif

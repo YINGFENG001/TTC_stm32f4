@@ -789,6 +789,11 @@
               <FilePath>..\User\stepper\bsp_device_usart_ctl.c</FilePath>
             </File>
             <File>
+              <FileName>bsp_ros_protocol.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\ros\bsp_ros_protocol.c</FilePath>
+            </File>
+            <File>
               <FileName>bsp_gripper_uart.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\gripper\bsp_gripper_uart.c</FilePath>

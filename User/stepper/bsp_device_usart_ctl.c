@@ -9,6 +9,7 @@
 #include "./gripper/bsp_bus_servo.h"
 #include "./gripper/bsp_gripper.h"
 #include "./vacum/bsp_evs08.h"
+#include "./ros/bsp_ros_protocol.h"
 
 typedef enum {
   DEVICE_MTOR1 = 0,
@@ -80,16 +81,19 @@ typedef struct {
   int32_t target;        /* 当前目标位置信息，单位0.1圈 */
   int32_t value;         /* 预留的通用数值状态 */
   uint32_t error_code;   /* 设备错误码 */
+  uint8_t has_ros_cmd;
+  uint32_t ros_cmd_id;
+  const char *ros_cmd_name;
 } EndDevice;
 
 #define INPUT_REV_SCALE                10
 #define MTOR_MAX_OUTPUT_REV_0P1        100000
 
 static EndDevice devices[DEVICE_NUM] = {
-  {DEVICE_MTOR1, "mtor1", DEVICE_TYPE_STEPPER, DEV_IDLE,      TRUE, 0, 0, 0, 0},
-  {DEVICE_MTOR2, "mtor2", DEVICE_TYPE_STEPPER, DEV_IDLE,      TRUE, 0, 0, 0, 0},
-  {DEVICE_CLAMP, "clamp", DEVICE_TYPE_SERVO,   DEV_IDLE,      TRUE, 0, 0, 0, 0},
-  {DEVICE_VACUM, "vacum", DEVICE_TYPE_VACUM,   DEV_IDLE,      TRUE, 0, 0, 0, 0}
+  {DEVICE_MTOR1, "mtor1", DEVICE_TYPE_STEPPER, DEV_IDLE,      TRUE, 0, 0, 0, 0, FALSE, 0, 0},
+  {DEVICE_MTOR2, "mtor2", DEVICE_TYPE_STEPPER, DEV_IDLE,      TRUE, 0, 0, 0, 0, FALSE, 0, 0},
+  {DEVICE_CLAMP, "clamp", DEVICE_TYPE_SERVO,   DEV_IDLE,      TRUE, 0, 0, 0, 0, FALSE, 0, 0},
+  {DEVICE_VACUM, "vacum", DEVICE_TYPE_VACUM,   DEV_IDLE,      TRUE, 0, 0, 0, 0, FALSE, 0, 0}
 };
 
 static StepperDeviceConfig stepper_cfg[STEPPER_NUM] = {
@@ -318,8 +322,21 @@ void Device_ReportDone(void)
   {
     if (devices[i].state == DEV_DONE)
     {
-      printf("\n\r%s done rev=", devices[i].name);
-      PrintFixed1Signed(devices[i].position);
+      if (devices[i].has_ros_cmd == TRUE)
+      {
+        RosProtocol_ReportStepperDone(devices[i].ros_cmd_id,
+                                      devices[i].name,
+                                      devices[i].ros_cmd_name,
+                                      devices[i].position);
+        devices[i].has_ros_cmd = FALSE;
+        devices[i].ros_cmd_id = 0;
+        devices[i].ros_cmd_name = 0;
+      }
+      else
+      {
+        printf("\n\r%s done rev=", devices[i].name);
+        PrintFixed1Signed(devices[i].position);
+      }
       devices[i].state = DEV_IDLE;
     }
   }
@@ -591,6 +608,282 @@ static uint8_t Stepper_CheckMotorEquivalentRange(uint8_t motor_id, const Stepper
   return TRUE;
 }
 
+static DeviceApiResult DeviceApi_FromStepperResult(StepperCmdResult result)
+{
+  switch (result)
+  {
+    case STEPPER_CMD_OK:          return DEVICE_API_OK;
+    case STEPPER_CMD_BUSY:        return DEVICE_API_BUSY;
+    case STEPPER_CMD_DISABLED:    return DEVICE_API_DISABLED;
+    case STEPPER_CMD_ID_ERROR:    return DEVICE_API_ID_ERROR;
+    case STEPPER_CMD_PARAM_ERROR: return DEVICE_API_PARAM_ERROR;
+    default:                      return DEVICE_API_DEVICE_ERROR;
+  }
+}
+
+static DeviceApiResult DeviceApi_FromBusServoResult(BusServoResult result)
+{
+  switch (result)
+  {
+    case BUS_SERVO_OK:             return DEVICE_API_OK;
+    case BUS_SERVO_UART_ERROR:     return DEVICE_API_UART_ERROR;
+    case BUS_SERVO_TIMEOUT:        return DEVICE_API_TIMEOUT;
+    case BUS_SERVO_ID_ERROR:       return DEVICE_API_ID_ERROR;
+    case BUS_SERVO_PARAM_ERROR:    return DEVICE_API_PARAM_ERROR;
+    case BUS_SERVO_CHECKSUM_ERROR: return DEVICE_API_CRC_ERROR;
+    default:                       return DEVICE_API_DEVICE_ERROR;
+  }
+}
+
+static DeviceApiResult DeviceApi_FromGripperResult(GripperResult result, BusServoResult servo_result)
+{
+  switch (result)
+  {
+    case GRIPPER_OK:          return DEVICE_API_OK;
+    case GRIPPER_RANGE_ERROR: return DEVICE_API_RANGE_ERROR;
+    case GRIPPER_TIMEOUT:     return DEVICE_API_TIMEOUT;
+    case GRIPPER_SERVO_ERROR:
+    case GRIPPER_STATUS_ERROR:
+    case GRIPPER_TORQUE_OFF_ERROR:
+    case GRIPPER_TORQUE_ON_ERROR:
+    case GRIPPER_MOVE_ERROR:  return DeviceApi_FromBusServoResult(servo_result);
+    default:                  return DEVICE_API_DEVICE_ERROR;
+  }
+}
+
+static DeviceApiResult DeviceApi_FromModbusResult(ModbusResult result)
+{
+  switch (result)
+  {
+    case MODBUS_OK:          return DEVICE_API_OK;
+    case MODBUS_UART_ERROR:  return DEVICE_API_UART_ERROR;
+    case MODBUS_TIMEOUT:     return DEVICE_API_TIMEOUT;
+    case MODBUS_CRC_ERROR:   return DEVICE_API_CRC_ERROR;
+    case MODBUS_ID_ERROR:    return DEVICE_API_ID_ERROR;
+    case MODBUS_PARAM_ERROR: return DEVICE_API_PARAM_ERROR;
+    default:                 return DEVICE_API_DEVICE_ERROR;
+  }
+}
+
+static void DeviceApi_FillClampStatus(uint8_t servo_id, const BusServoStatus *src, DeviceClampStatus *out)
+{
+  if ((src == 0) || (out == 0))
+  {
+    return;
+  }
+
+  out->servo_id = servo_id;
+  out->pos = src->position;
+  out->speed = src->speed;
+  out->load = src->load;
+  out->voltage = src->voltage;
+  out->temp = src->temperature;
+  out->current = src->current;
+  out->state = src->status;
+}
+
+static void DeviceApi_FillVacumStatus(const Evs08Status *src, DeviceVacumStatus *out)
+{
+  if ((src == 0) || (out == 0))
+  {
+    return;
+  }
+
+  out->state1 = src->ch1_status_reg;
+  out->state2 = src->ch2_status_reg;
+  out->fault = src->fault_reg;
+  out->busy1 = src->ch1_busy;
+  out->busy2 = src->ch2_busy;
+  out->obj1 = src->ch1_obj;
+  out->obj2 = src->ch2_obj;
+  out->vac1 = src->ch1_vac_percent;
+  out->vac2 = src->ch2_vac_percent;
+  out->temp = src->temperature;
+  out->bus_x10 = src->bus_voltage_x10;
+}
+
+static DeviceApiResult DeviceApi_StepperStart(uint8_t motor_id, const StepperParam *param)
+{
+  int32_t step_target;
+  uint32_t accel_internal;
+  uint32_t decel_internal;
+  uint32_t speed_internal;
+  StepperCmdResult result;
+
+  if ((!STEPPER_ID_VALID(motor_id)) || (param == 0))
+  {
+    return DEVICE_API_PARAM_ERROR;
+  }
+
+  Stepper_ApplyMechanicalConfig();
+
+  if ((Stepper_CheckUserRange(motor_id, param) != TRUE) ||
+      (Stepper_CheckMotorEquivalentRange(motor_id, param) != TRUE))
+  {
+    return DEVICE_API_RANGE_ERROR;
+  }
+
+  stepper_cfg[motor_id].param = *param;
+  step_target = Stepper_RevToStep(motor_id, param->rev_0p1);
+  accel_internal = Stepper_RpmPerSecToAccel(motor_id, param->accel_rpm_s);
+  decel_internal = Stepper_RpmPerSecToAccel(motor_id, param->decel_rpm_s);
+  speed_internal = Stepper_RpmToSpeed(motor_id, param->rpm);
+
+  devices[motor_id].target = param->rev_0p1;
+  result = stepper_move_T(motor_id, step_target, accel_internal, decel_internal, speed_internal);
+  if (result == STEPPER_CMD_OK)
+  {
+    devices[motor_id].state = DEV_RUNNING;
+  }
+
+  return DeviceApi_FromStepperResult(result);
+}
+
+DeviceApiResult DeviceApi_StepperStatus(uint8_t motor_id, DeviceStepperStatus *out)
+{
+  if ((!STEPPER_ID_VALID(motor_id)) || (out == 0))
+  {
+    return DEVICE_API_PARAM_ERROR;
+  }
+
+  Device_Task();
+  out->enabled = devices[motor_id].enabled;
+  out->running = (devices[motor_id].state == DEV_RUNNING) ? TRUE : FALSE;
+  out->rev_0p1 = devices[motor_id].position;
+  out->target_0p1 = devices[motor_id].target;
+  out->err = devices[motor_id].error_code;
+  out->accel_rpm_s = stepper_cfg[motor_id].param.accel_rpm_s;
+  out->decel_rpm_s = stepper_cfg[motor_id].param.decel_rpm_s;
+  out->rpm = stepper_cfg[motor_id].param.rpm;
+  return DEVICE_API_OK;
+}
+
+DeviceApiResult DeviceApi_StepperMove(uint8_t motor_id, int32_t rev_0p1,
+                                      uint32_t accel, uint32_t decel, uint32_t rpm)
+{
+  StepperParam param;
+
+  if (!STEPPER_ID_VALID(motor_id))
+  {
+    return DEVICE_API_PARAM_ERROR;
+  }
+
+  param.rev_0p1 = rev_0p1;
+  param.accel_rpm_s = accel;
+  param.decel_rpm_s = decel;
+  param.rpm = rpm;
+  return DeviceApi_StepperStart(motor_id, &param);
+}
+
+DeviceApiResult DeviceApi_StepperTurn(uint8_t motor_id, int32_t rev_0p1)
+{
+  StepperParam param;
+
+  if (!STEPPER_ID_VALID(motor_id))
+  {
+    return DEVICE_API_PARAM_ERROR;
+  }
+
+  param = stepper_cfg[motor_id].param;
+  param.rev_0p1 = rev_0p1;
+  return DeviceApi_StepperStart(motor_id, &param);
+}
+
+DeviceApiResult DeviceApi_StepperStop(uint8_t motor_id, int32_t *rev_0p1)
+{
+  StepperCmdResult result;
+
+  if (!STEPPER_ID_VALID(motor_id))
+  {
+    return DEVICE_API_PARAM_ERROR;
+  }
+
+  Device_Task();
+  result = Stepper_Stop(motor_id);
+  devices[motor_id].target = devices[motor_id].position;
+  devices[motor_id].state = DEV_IDLE;
+  devices[motor_id].has_ros_cmd = FALSE;
+  devices[motor_id].ros_cmd_id = 0;
+  devices[motor_id].ros_cmd_name = 0;
+  if (rev_0p1 != 0)
+  {
+    *rev_0p1 = devices[motor_id].position;
+  }
+  return DeviceApi_FromStepperResult(result);
+}
+
+DeviceApiResult DeviceApi_StepperSetAccel(uint8_t motor_id, uint32_t accel)
+{
+  StepperParam param;
+
+  if (!STEPPER_ID_VALID(motor_id))
+  {
+    return DEVICE_API_PARAM_ERROR;
+  }
+
+  param = stepper_cfg[motor_id].param;
+  param.accel_rpm_s = accel;
+  if ((Stepper_CheckUserRange(motor_id, &param) != TRUE) ||
+      (Stepper_CheckMotorEquivalentRange(motor_id, &param) != TRUE))
+  {
+    return DEVICE_API_RANGE_ERROR;
+  }
+  stepper_cfg[motor_id].param = param;
+  return DEVICE_API_OK;
+}
+
+DeviceApiResult DeviceApi_StepperSetDecel(uint8_t motor_id, uint32_t decel)
+{
+  StepperParam param;
+
+  if (!STEPPER_ID_VALID(motor_id))
+  {
+    return DEVICE_API_PARAM_ERROR;
+  }
+
+  param = stepper_cfg[motor_id].param;
+  param.decel_rpm_s = decel;
+  if ((Stepper_CheckUserRange(motor_id, &param) != TRUE) ||
+      (Stepper_CheckMotorEquivalentRange(motor_id, &param) != TRUE))
+  {
+    return DEVICE_API_RANGE_ERROR;
+  }
+  stepper_cfg[motor_id].param = param;
+  return DEVICE_API_OK;
+}
+
+DeviceApiResult DeviceApi_StepperSetRpm(uint8_t motor_id, uint32_t rpm)
+{
+  StepperParam param;
+
+  if (!STEPPER_ID_VALID(motor_id))
+  {
+    return DEVICE_API_PARAM_ERROR;
+  }
+
+  param = stepper_cfg[motor_id].param;
+  param.rpm = rpm;
+  if ((Stepper_CheckUserRange(motor_id, &param) != TRUE) ||
+      (Stepper_CheckMotorEquivalentRange(motor_id, &param) != TRUE))
+  {
+    return DEVICE_API_RANGE_ERROR;
+  }
+  stepper_cfg[motor_id].param = param;
+  return DEVICE_API_OK;
+}
+
+void DeviceApi_BindStepperRosCmd(uint8_t motor_id, uint32_t id, const char *cmd)
+{
+  if (!STEPPER_ID_VALID(motor_id))
+  {
+    return;
+  }
+
+  devices[motor_id].has_ros_cmd = TRUE;
+  devices[motor_id].ros_cmd_id = id;
+  devices[motor_id].ros_cmd_name = cmd;
+}
+
 static void Stepper_Command(uint8_t device_id, int argc, char *argv[])
 {
   uint8_t motor_id;
@@ -856,6 +1149,134 @@ static void Clamp_PrintMoveResult(const char *action, uint8_t servo_id,
   printf("\n\r");
 }
 
+DeviceApiResult DeviceApi_ClampStatus(uint8_t servo_id, DeviceClampStatus *out)
+{
+  uint8_t servo_error;
+  BusServoResult result;
+  BusServoStatus status_data;
+
+  if (out == 0)
+  {
+    return DEVICE_API_PARAM_ERROR;
+  }
+
+  servo_error = 0;
+  result = BusServo_ReadStatus(servo_id, &status_data, &servo_error);
+  if (result != BUS_SERVO_OK)
+  {
+    devices[DEVICE_CLAMP].state = DEV_ERROR;
+    devices[DEVICE_CLAMP].error_code = result;
+    return DeviceApi_FromBusServoResult(result);
+  }
+
+  Clamp_FillExtraStatus(servo_id, &status_data);
+  DeviceApi_FillClampStatus(servo_id, &status_data, out);
+  devices[DEVICE_CLAMP].state = (status_data.moving != 0) ? DEV_RUNNING : DEV_IDLE;
+  devices[DEVICE_CLAMP].position = status_data.position;
+  devices[DEVICE_CLAMP].target = status_data.position;
+  devices[DEVICE_CLAMP].value = status_data.status;
+  devices[DEVICE_CLAMP].error_code = 0;
+  return DEVICE_API_OK;
+}
+
+DeviceApiResult DeviceApi_ClampMove(uint16_t position, uint16_t speed, DeviceClampStatus *out)
+{
+  BusServoResult servo_result;
+  BusServoStatus final_status;
+  GripperResult gripper_result;
+  DeviceApiResult ret;
+
+  memset(&final_status, 0, sizeof(final_status));
+  gripper_result = Gripper_MoveFeedback(GRIPPER_SERVO_ID_DEFAULT, position, speed,
+                                        &final_status, &servo_result);
+  ret = DeviceApi_FromGripperResult(gripper_result, servo_result);
+  if (ret == DEVICE_API_OK)
+  {
+    DeviceApi_FillClampStatus(GRIPPER_SERVO_ID_DEFAULT, &final_status, out);
+    devices[DEVICE_CLAMP].position = final_status.position;
+    devices[DEVICE_CLAMP].target = position;
+    devices[DEVICE_CLAMP].value = final_status.status;
+    devices[DEVICE_CLAMP].error_code = 0;
+    devices[DEVICE_CLAMP].state = DEV_IDLE;
+  }
+  else
+  {
+    devices[DEVICE_CLAMP].error_code = gripper_result;
+    devices[DEVICE_CLAMP].state = DEV_ERROR;
+  }
+  return ret;
+}
+
+DeviceApiResult DeviceApi_ClampOpen(uint16_t speed, DeviceClampStatus *out)
+{
+  return DeviceApi_ClampMove(GRIPPER_POS_OPEN_MAX, speed, out);
+}
+
+DeviceApiResult DeviceApi_ClampClose(uint16_t speed, DeviceClampStatus *out)
+{
+  return DeviceApi_ClampMove(GRIPPER_POS_CLOSE_MIN, speed, out);
+}
+
+DeviceApiResult DeviceApi_ClampGrip(uint16_t load, uint16_t speed, uint16_t step, DeviceClampStatus *out)
+{
+  BusServoResult servo_result;
+  BusServoStatus final_status;
+  GripperResult gripper_result;
+  DeviceApiResult ret;
+
+  memset(&final_status, 0, sizeof(final_status));
+  gripper_result = Gripper_Grip(GRIPPER_SERVO_ID_DEFAULT, load, speed, step,
+                                &final_status, &servo_result);
+  ret = DeviceApi_FromGripperResult(gripper_result, servo_result);
+  if (ret == DEVICE_API_OK)
+  {
+    DeviceApi_FillClampStatus(GRIPPER_SERVO_ID_DEFAULT, &final_status, out);
+    devices[DEVICE_CLAMP].position = final_status.position;
+    devices[DEVICE_CLAMP].target = final_status.position;
+    devices[DEVICE_CLAMP].value = final_status.status;
+    devices[DEVICE_CLAMP].error_code = 0;
+    devices[DEVICE_CLAMP].state = DEV_IDLE;
+  }
+  else
+  {
+    devices[DEVICE_CLAMP].error_code = gripper_result;
+    devices[DEVICE_CLAMP].state = DEV_ERROR;
+  }
+  return ret;
+}
+
+DeviceApiResult DeviceApi_ClampRelease(uint16_t delta, uint16_t speed, DeviceClampStatus *out)
+{
+  int16_t cur_pos;
+  uint16_t target_pos;
+  BusServoResult servo_result;
+  BusServoStatus final_status;
+  GripperResult gripper_result;
+  DeviceApiResult ret;
+
+  cur_pos = 0;
+  target_pos = 0;
+  memset(&final_status, 0, sizeof(final_status));
+  gripper_result = Gripper_Release(GRIPPER_SERVO_ID_DEFAULT, delta, speed,
+                                   &cur_pos, &target_pos, &final_status, &servo_result);
+  ret = DeviceApi_FromGripperResult(gripper_result, servo_result);
+  if (ret == DEVICE_API_OK)
+  {
+    DeviceApi_FillClampStatus(GRIPPER_SERVO_ID_DEFAULT, &final_status, out);
+    devices[DEVICE_CLAMP].position = final_status.position;
+    devices[DEVICE_CLAMP].target = target_pos;
+    devices[DEVICE_CLAMP].value = final_status.status;
+    devices[DEVICE_CLAMP].error_code = 0;
+    devices[DEVICE_CLAMP].state = DEV_IDLE;
+  }
+  else
+  {
+    devices[DEVICE_CLAMP].error_code = gripper_result;
+    devices[DEVICE_CLAMP].state = DEV_ERROR;
+  }
+  return ret;
+}
+
 static void Clamp_Command(uint8_t device_id, int argc, char *argv[])
 {
   uint8_t servo_id;
@@ -1116,6 +1537,78 @@ static void Vacum_PrintResult(const char *action, ModbusResult result)
   printf("\n\rvacum %s result=%s", action, Evs08_ResultName(result));
 }
 
+DeviceApiResult DeviceApi_VacumSet(uint8_t min_vac, uint8_t max_vac, uint8_t timeout)
+{
+  ModbusResult result;
+
+  if ((min_vac > 100) || (max_vac > 100) || (min_vac > max_vac) ||
+      (timeout == 0))
+  {
+    return DEVICE_API_RANGE_ERROR;
+  }
+
+  result = Evs08_SetParams(min_vac, max_vac, timeout);
+  devices[DEVICE_VACUM].state = (result == MODBUS_OK) ? DEV_IDLE : DEV_ERROR;
+  devices[DEVICE_VACUM].error_code = (result == MODBUS_OK) ? 0 : result;
+  return DeviceApi_FromModbusResult(result);
+}
+
+DeviceApiResult DeviceApi_VacumGrip(void)
+{
+  ModbusResult result;
+
+  result = Evs08_Grip();
+  devices[DEVICE_VACUM].state = (result == MODBUS_OK) ? DEV_RUNNING : DEV_ERROR;
+  devices[DEVICE_VACUM].error_code = (result == MODBUS_OK) ? 0 : result;
+  return DeviceApi_FromModbusResult(result);
+}
+
+DeviceApiResult DeviceApi_VacumRelease(void)
+{
+  ModbusResult result;
+
+  result = Evs08_Release();
+  devices[DEVICE_VACUM].state = (result == MODBUS_OK) ? DEV_IDLE : DEV_ERROR;
+  devices[DEVICE_VACUM].error_code = (result == MODBUS_OK) ? 0 : result;
+  return DeviceApi_FromModbusResult(result);
+}
+
+DeviceApiResult DeviceApi_VacumStop(void)
+{
+  ModbusResult result;
+
+  result = Evs08_Stop();
+  devices[DEVICE_VACUM].state = (result == MODBUS_OK) ? DEV_IDLE : DEV_ERROR;
+  devices[DEVICE_VACUM].error_code = (result == MODBUS_OK) ? 0 : result;
+  return DeviceApi_FromModbusResult(result);
+}
+
+DeviceApiResult DeviceApi_VacumStatus(DeviceVacumStatus *out)
+{
+  ModbusResult result;
+  Evs08Status status_data;
+
+  if (out == 0)
+  {
+    return DEVICE_API_PARAM_ERROR;
+  }
+
+  result = Evs08_ReadStatus(&status_data);
+  if (result != MODBUS_OK)
+  {
+    devices[DEVICE_VACUM].state = DEV_ERROR;
+    devices[DEVICE_VACUM].error_code = result;
+    return DeviceApi_FromModbusResult(result);
+  }
+
+  DeviceApi_FillVacumStatus(&status_data, out);
+  devices[DEVICE_VACUM].enabled = (status_data.ch1_enabled || status_data.ch2_enabled) ? TRUE : FALSE;
+  devices[DEVICE_VACUM].value = status_data.ch1_status_reg;
+  devices[DEVICE_VACUM].error_code = 0;
+  devices[DEVICE_VACUM].state = (status_data.ch1_busy || status_data.ch2_busy) ? DEV_RUNNING : DEV_IDLE;
+  return DEVICE_API_OK;
+}
+
 static void Vacum_Command(uint8_t device_id, int argc, char *argv[])
 {
   uint8_t max_vac;
@@ -1330,7 +1823,10 @@ void DealSerialData(void)
 
   if (status.cmd == TRUE)
   {
-    Command_Dispatch((char *)UART_RxBuffer);
+    if (RosProtocol_TryDispatch((char *)UART_RxBuffer) != TRUE)
+    {
+      Command_Dispatch((char *)UART_RxBuffer);
+    }
     status.cmd = FALSE;
     uart_FlushRxBuffer();
   }
