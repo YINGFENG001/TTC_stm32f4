@@ -51,6 +51,21 @@ static GripperResult Gripper_StopOnStall(uint8_t servo_id, BusServoResult *servo
   return GRIPPER_STALL;
 }
 
+static GripperResult Gripper_StopAfterMove(uint8_t servo_id, GripperResult move_result,
+                                           BusServoResult *servo_result)
+{
+  BusServoResult result;
+
+  result = BusServo_SetTorqueEnable(servo_id, 0);
+  Gripper_SetServoResult(servo_result, result);
+  if (result != BUS_SERVO_OK)
+  {
+    return GRIPPER_TORQUE_OFF_ERROR;
+  }
+
+  return move_result;
+}
+
 GripperResult Gripper_MoveFeedback(uint8_t servo_id, uint16_t position, uint16_t speed,
                                    BusServoStatus *final_status, BusServoResult *servo_result)
 {
@@ -65,6 +80,13 @@ GripperResult Gripper_MoveFeedback(uint8_t servo_id, uint16_t position, uint16_t
   if ((Gripper_PositionValid(position) == 0) || (Gripper_SpeedValid(speed) == 0))
   {
     return GRIPPER_RANGE_ERROR;
+  }
+
+  result = BusServo_SetTorqueEnable(servo_id, 1);
+  Gripper_SetServoResult(servo_result, result);
+  if (result != BUS_SERVO_OK)
+  {
+    return GRIPPER_TORQUE_ON_ERROR;
   }
 
   result = BusServo_MoveRaw(servo_id, position, speed);
@@ -97,7 +119,7 @@ GripperResult Gripper_MoveFeedback(uint8_t servo_id, uint16_t position, uint16_t
 
     if (Gripper_Abs16(Gripper_PositionDiff(position, status.position)) <= GRIPPER_MOVE_TOLERANCE)
     {
-      return GRIPPER_OK;
+      return Gripper_StopAfterMove(servo_id, GRIPPER_OK, servo_result);
     }
 
     if (Gripper_Abs16(status.load) >= GRIPPER_STALL_LOAD_LIMIT)
@@ -114,7 +136,7 @@ GripperResult Gripper_MoveFeedback(uint8_t servo_id, uint16_t position, uint16_t
     }
   }
 
-  return GRIPPER_TIMEOUT;
+  return Gripper_StopAfterMove(servo_id, GRIPPER_TIMEOUT, servo_result);
 }
 
 GripperResult Gripper_Grip(uint8_t servo_id, uint16_t load_threshold, uint16_t speed,
@@ -144,6 +166,13 @@ GripperResult Gripper_Grip(uint8_t servo_id, uint16_t load_threshold, uint16_t s
     return GRIPPER_STATUS_ERROR;
   }
   Gripper_CopyStatus(final_status, &status);
+
+  result = BusServo_SetTorqueEnable(servo_id, 1);
+  Gripper_SetServoResult(servo_result, result);
+  if (result != BUS_SERVO_OK)
+  {
+    return GRIPPER_TORQUE_ON_ERROR;
+  }
 
   load_hits = 0;
   target = (status.position < GRIPPER_POS_OPEN_MAX) ? GRIPPER_POS_OPEN_MAX : (uint16_t)status.position;
@@ -206,8 +235,7 @@ GripperResult Gripper_Release(uint8_t servo_id, uint16_t delta, uint16_t speed,
 
   if ((delta < GRIPPER_RELEASE_DELTA_MIN) ||
       (delta > GRIPPER_RELEASE_DELTA_MAX) ||
-      (speed < GRIPPER_RELEASE_SPEED_MIN) ||
-      (speed > GRIPPER_RELEASE_SPEED_MAX))
+      (Gripper_SpeedValid(speed) == 0))
   {
     return GRIPPER_RANGE_ERROR;
   }
@@ -253,7 +281,24 @@ GripperResult Gripper_Release(uint8_t servo_id, uint16_t delta, uint16_t speed,
     return GRIPPER_TORQUE_ON_ERROR;
   }
 
-  return Gripper_MoveFeedback(servo_id, release_pos, speed, final_status, servo_result);
+  {
+    GripperResult move_result;
+
+    move_result = Gripper_MoveFeedback(servo_id, release_pos, speed, final_status, servo_result);
+    if (move_result != GRIPPER_OK)
+    {
+      return move_result;
+    }
+  }
+
+  result = BusServo_SetTorqueEnable(servo_id, 0);
+  Gripper_SetServoResult(servo_result, result);
+  if (result != BUS_SERVO_OK)
+  {
+    return GRIPPER_TORQUE_OFF_ERROR;
+  }
+
+  return GRIPPER_OK;
 }
 
 GripperResult Gripper_Open(uint8_t servo_id, uint16_t speed, BusServoResult *servo_result)

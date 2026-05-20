@@ -132,11 +132,11 @@ void MSD_ENA(FunctionalState NewState)
 
   if (NewState)
   {
-    printf("\n\r驱动器恢复运行，两路电机均为保持力矩状态");
+    printf("\n驱动器恢复运行，两路电机均为保持力矩状态");
   }
   else
   {
-    printf("\n\r驱动器禁止输出，两路电机均为脱机状态");
+    printf("\n驱动器禁止输出，两路电机均为脱机状态");
   }
 }
 

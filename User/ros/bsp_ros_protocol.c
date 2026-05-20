@@ -93,25 +93,25 @@ static uint8_t Ros_ParseU8(const char *text, uint8_t *out)
 
 static void Ros_PrintAck(const RosCmdContext *ctx, const char *result)
 {
-  printf("\n\r@ack id=%lu dev=%s cmd=%s result=%s",
+  printf("\n@ack id=%lu dev=%s cmd=%s result=%s",
          (unsigned long)ctx->id, ctx->dev, ctx->cmd, result);
 }
 
 static void Ros_PrintDone(const RosCmdContext *ctx, const char *result)
 {
-  printf("\n\r@done id=%lu dev=%s cmd=%s result=%s",
+  printf("\n@done id=%lu dev=%s cmd=%s result=%s",
          (unsigned long)ctx->id, ctx->dev, ctx->cmd, result);
 }
 
 static void Ros_PrintState(uint32_t id, const char *dev, const char *result)
 {
-  printf("\n\r@state id=%lu dev=%s result=%s",
+  printf("\n@state id=%lu dev=%s result=%s",
          (unsigned long)id, dev, result);
 }
 
 static void Ros_PrintErr(const RosCmdContext *ctx, const char *code, const char *detail)
 {
-  printf("\n\r@err id=%lu dev=%s cmd=%s code=%s",
+  printf("\n@err id=%lu dev=%s cmd=%s code=%s",
          (unsigned long)ctx->id, ctx->dev, ctx->cmd, code);
   if (detail != 0)
   {
@@ -308,16 +308,16 @@ static void Ros_HandleStepper(uint32_t id, const char *dev, int argc, char *argv
 }
 
 static void Ros_PrintClampDone(const RosCmdContext *ctx, uint16_t target,
-                               uint16_t speed, const DeviceClampStatus *s)
+                               const DeviceClampStatus *s)
 {
   Ros_PrintDone(ctx, "ok");
-  printf(" target=%u speed=%u pos=%d load=%d current=%d state=0x%02X",
-         target, speed, s->pos, s->load, s->current, s->state);
+  printf(" target=%u pos=%d load=%d current=%d state=0x%02X",
+         target, s->pos, s->load, s->current, s->state);
 }
 
 static void Ros_HandleClamp(uint32_t id, int argc, char *argv[])
 {
-  uint16_t position;
+  uint16_t open_percentage;
   uint16_t speed;
   uint16_t load;
   uint16_t step;
@@ -368,23 +368,18 @@ static void Ros_HandleClamp(uint32_t id, int argc, char *argv[])
 
   if (strcmp(argv[0], "move") == 0)
   {
-    if ((argc < 2) || (argc > 3) ||
-        (Ros_ParseU16(argv[1], &position) != TRUE))
-    {
-      Ros_PrintErr(&ctx, "param_error", 0);
-      return;
-    }
-    speed = 1000;
-    if ((argc == 3) && (Ros_ParseU16(argv[2], &speed) != TRUE))
+    if ((argc != 2) ||
+        (Ros_ParseU16(argv[1], &open_percentage) != TRUE) ||
+        (open_percentage > 100))
     {
       Ros_PrintErr(&ctx, "param_error", 0);
       return;
     }
 
-    ret = DeviceApi_ClampMove(position, speed, &s);
+    ret = DeviceApi_ClampMove((uint8_t)open_percentage, &s);
     if (ret == DEVICE_API_OK)
     {
-      Ros_PrintClampDone(&ctx, position, speed, &s);
+      Ros_PrintClampDone(&ctx, open_percentage, &s);
     }
     else
     {
@@ -395,13 +390,7 @@ static void Ros_HandleClamp(uint32_t id, int argc, char *argv[])
 
   if ((strcmp(argv[0], "open") == 0) || (strcmp(argv[0], "close") == 0))
   {
-    if (argc > 2)
-    {
-      Ros_PrintErr(&ctx, "param_error", 0);
-      return;
-    }
-    speed = 1000;
-    if ((argc == 2) && (Ros_ParseU16(argv[1], &speed) != TRUE))
+    if (argc != 1)
     {
       Ros_PrintErr(&ctx, "param_error", 0);
       return;
@@ -409,18 +398,18 @@ static void Ros_HandleClamp(uint32_t id, int argc, char *argv[])
 
     if (strcmp(argv[0], "open") == 0)
     {
-      ret = DeviceApi_ClampOpen(speed, &s);
-      position = 800;
+      ret = DeviceApi_ClampOpen(&s);
+      open_percentage = 100;
     }
     else
     {
-      ret = DeviceApi_ClampClose(speed, &s);
-      position = 2048;
+      ret = DeviceApi_ClampClose(&s);
+      open_percentage = 0;
     }
 
     if (ret == DEVICE_API_OK)
     {
-      Ros_PrintClampDone(&ctx, position, speed, &s);
+      Ros_PrintClampDone(&ctx, open_percentage, &s);
     }
     else
     {
@@ -431,24 +420,18 @@ static void Ros_HandleClamp(uint32_t id, int argc, char *argv[])
 
   if (strcmp(argv[0], "grip") == 0)
   {
-    load = 400;
-    speed = 1000;
-    step = 20;
-    if (((argc >= 2) && (Ros_ParseU16(argv[1], &load) != TRUE)) ||
-        ((argc >= 3) && (Ros_ParseU16(argv[2], &speed) != TRUE)) ||
-        ((argc >= 4) && (Ros_ParseU16(argv[3], &step) != TRUE)) ||
-        (argc > 4))
+    if ((argc != 2) || (Ros_ParseU16(argv[1], &load) != TRUE))
     {
       Ros_PrintErr(&ctx, "param_error", 0);
       return;
     }
 
-    ret = DeviceApi_ClampGrip(load, speed, step, &s);
+    ret = DeviceApi_ClampGrip(load, &s);
     if (ret == DEVICE_API_OK)
     {
       Ros_PrintDone(&ctx, "ok");
-      printf(" load=%u speed=%u step=%u pos=%d current=%d state=0x%02X",
-             load, speed, step, s.pos, s.current, s.state);
+      printf(" load=%u pos=%d current=%d state=0x%02X",
+             load, s.pos, s.current, s.state);
     }
     else
     {
@@ -459,22 +442,42 @@ static void Ros_HandleClamp(uint32_t id, int argc, char *argv[])
 
   if (strcmp(argv[0], "release") == 0)
   {
-    delta = 100;
-    speed = 500;
-    if (((argc >= 2) && (Ros_ParseU16(argv[1], &delta) != TRUE)) ||
-        ((argc >= 3) && (Ros_ParseU16(argv[2], &speed) != TRUE)) ||
-        (argc > 3))
+    if (argc != 1)
     {
       Ros_PrintErr(&ctx, "param_error", 0);
       return;
     }
 
-    ret = DeviceApi_ClampRelease(delta, speed, &s);
+    ret = DeviceApi_ClampRelease(&s);
     if (ret == DEVICE_API_OK)
     {
       Ros_PrintDone(&ctx, "ok");
-      printf(" delta=%u speed=%u pos=%d current=%d state=0x%02X",
-             delta, speed, s.pos, s.current, s.state);
+      printf(" pos=%d current=%d state=0x%02X",
+             s.pos, s.current, s.state);
+    }
+    else
+    {
+      Ros_PrintErr(&ctx, Ros_ResultName(ret), 0);
+    }
+    return;
+  }
+
+  if (strcmp(argv[0], "set") == 0)
+  {
+    if ((argc != 4) ||
+        (Ros_ParseU16(argv[1], &speed) != TRUE) ||
+        (Ros_ParseU16(argv[2], &step) != TRUE) ||
+        (Ros_ParseU16(argv[3], &delta) != TRUE))
+    {
+      Ros_PrintErr(&ctx, "param_error", 0);
+      return;
+    }
+
+    ret = DeviceApi_ClampSet(speed, step, delta);
+    if (ret == DEVICE_API_OK)
+    {
+      Ros_PrintAck(&ctx, "ok");
+      printf(" speed=%u gripStep=%u releaseDelta=%u", speed, step, delta);
     }
     else
     {
@@ -625,13 +628,13 @@ uint8_t RosProtocol_TryDispatch(char *line)
   argc = Ros_ParseArgv(line, argv, 8);
   if (argc < 2)
   {
-    printf("\n\r@err id=0 dev=unknown cmd=none code=param_error");
+    printf("\n@err id=0 dev=unknown cmd=none code=param_error");
     return TRUE;
   }
 
   if ((Ros_ParseU32(&argv[0][1], &id) != TRUE) || (id == 0))
   {
-    printf("\n\r@err id=0 dev=unknown cmd=none code=id_error");
+    printf("\n@err id=0 dev=unknown cmd=none code=id_error");
     return TRUE;
   }
 
@@ -673,6 +676,6 @@ uint8_t RosProtocol_TryDispatch(char *line)
 void RosProtocol_ReportStepperDone(uint32_t id, const char *dev,
                                    const char *cmd, int32_t rev_0p1)
 {
-  printf("\n\r@done id=%lu dev=%s cmd=%s result=ok rev=%ld",
+  printf("\n@done id=%lu dev=%s cmd=%s result=ok rev=%ld",
          (unsigned long)id, dev, cmd, (long)rev_0p1);
 }

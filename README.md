@@ -95,23 +95,34 @@ mtor2 status
 ```text
 clamp ping [id]
 clamp status [id]
-clamp open [speed]
-clamp close [speed]
-clamp move [position] [speed]
-clamp grip [load] [speed] [step]
-clamp release [delta] [speed]
+clamp readreg [addr]
+clamp open
+clamp close
+clamp move [openPercentage: 0~100(%)]
+clamp grip [load]
+clamp release
+clamp set [speed] [gripStep] [releaseDelta]
 ```
 
 单位：
 
-- `position`：舵机原始位置值
+- `openPercentage`：`0~100`，`0` 闭合，`100` 张开
 - `load`：`0.1%`
+- `speed`：`1~3000`，默认 `1000`
+- `gripStep`：`5~100`，默认 `30`
+- `releaseDelta`：`20~400`，默认 `100`
 - `current`：`6.5mA`
 
 当前夹爪标定：
 
-- `open = 800`
+- `open = 500`
 - `close = 2048`
+
+保护逻辑：
+
+- `open` / `close` / `move` 到位后会自动取消扭矩使能，避免夹爪继续出力顶住机构。
+- `open` / `close` / `move` 运行中如果负载达到 `70%` 并连续命中 3 次，会判定堵转并自动取消扭矩使能，防止损坏。
+- `grip` 夹取成功后保持扭矩使能，用于维持夹持力。
 
 ### EVS08 真空吸盘
 

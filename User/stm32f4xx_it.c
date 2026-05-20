@@ -199,6 +199,13 @@ void DEBUG_USART_IRQHandler(void)
 						}
 					}
 					//如果不是退格键
+					else if ((data == '\r') || (data == '\n'))
+					{
+						if ((UART_RxPtr > 0) && (status.cmd != TRUE))
+						{
+							status.cmd = TRUE;
+						}
+					}
 					else
 					{
 						//将数据填入数组UART_RxBuffer
@@ -215,14 +222,7 @@ void DEBUG_USART_IRQHandler(void)
 							Usart_SendByte('\b');
 						}
 						//如果为回车键，则开始处理串口数据
-						if(data == 13)
-						{
-							status.cmd = TRUE;
-						}
-						else
-						{
-							Usart_SendByte(data);
-						}
+						Usart_SendByte(data);
 					}
 			}
     

@@ -5,7 +5,7 @@
 #include "./gripper/bsp_bus_servo.h"
 
 #define GRIPPER_SERVO_ID_DEFAULT             BUS_SERVO_DEFAULT_ID
-#define GRIPPER_POS_OPEN_MAX                 800
+#define GRIPPER_POS_OPEN_MAX                 500
 #define GRIPPER_POS_CLOSE_MIN                2048
 #define GRIPPER_SPEED_DEFAULT                1000
 #define GRIPPER_SPEED_MIN                    1
@@ -18,7 +18,7 @@
 #define GRIPPER_GRIP_LOAD_DEFAULT            400
 #define GRIPPER_GRIP_LOAD_MIN                100
 #define GRIPPER_GRIP_LOAD_MAX                900
-#define GRIPPER_GRIP_STEP_DEFAULT            20
+#define GRIPPER_GRIP_STEP_DEFAULT            30
 #define GRIPPER_GRIP_STEP_MIN                5
 #define GRIPPER_GRIP_STEP_MAX                100
 #define GRIPPER_GRIP_HIT_LIMIT               2

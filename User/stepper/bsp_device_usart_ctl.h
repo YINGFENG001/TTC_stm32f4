@@ -74,11 +74,12 @@ DeviceApiResult DeviceApi_StepperSetRpm(uint8_t motor_id, uint32_t rpm);
 void DeviceApi_BindStepperRosCmd(uint8_t motor_id, uint32_t id, const char *cmd);
 
 DeviceApiResult DeviceApi_ClampStatus(uint8_t servo_id, DeviceClampStatus *out);
-DeviceApiResult DeviceApi_ClampMove(uint16_t position, uint16_t speed, DeviceClampStatus *out);
-DeviceApiResult DeviceApi_ClampOpen(uint16_t speed, DeviceClampStatus *out);
-DeviceApiResult DeviceApi_ClampClose(uint16_t speed, DeviceClampStatus *out);
-DeviceApiResult DeviceApi_ClampGrip(uint16_t load, uint16_t speed, uint16_t step, DeviceClampStatus *out);
-DeviceApiResult DeviceApi_ClampRelease(uint16_t delta, uint16_t speed, DeviceClampStatus *out);
+DeviceApiResult DeviceApi_ClampMove(uint8_t open_percentage, DeviceClampStatus *out);
+DeviceApiResult DeviceApi_ClampOpen(DeviceClampStatus *out);
+DeviceApiResult DeviceApi_ClampClose(DeviceClampStatus *out);
+DeviceApiResult DeviceApi_ClampGrip(uint16_t load, DeviceClampStatus *out);
+DeviceApiResult DeviceApi_ClampRelease(DeviceClampStatus *out);
+DeviceApiResult DeviceApi_ClampSet(uint16_t speed, uint16_t grip_step, uint16_t release_delta);
 
 DeviceApiResult DeviceApi_VacumSet(uint8_t min_vac, uint8_t max_vac, uint8_t timeout);
 DeviceApiResult DeviceApi_VacumGrip(void);
