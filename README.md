@@ -61,34 +61,27 @@ STM32F407 末端设备控制工程，当前包含双路步进电机、1 路串�
 ### 步进电机
 
 ```text
-mtor1 turn [rev]
-mtor1 move [rev] [accel] [decel] [rpm]
-mtor1 stop
-mtor1 accel [value]
-mtor1 decel [value]
-mtor1 rpm [value]
-mtor1 status
-
-mtor2 turn [rev]
-mtor2 move [rev] [accel] [decel] [rpm]
-mtor2 stop
-mtor2 accel [value]
-mtor2 decel [value]
-mtor2 rpm [value]
-mtor2 status
+mtor1/2 move [rev]
+mtor1/2 stop
+mtor1/2 accel [value]
+mtor1/2 decel [value]
+mtor1/2 rpm [value]
+mtor1/2 status
 ```
 
 单位：
 
-- `rev`：`0.1圈`
+- `rev`：`0.1圈`，普通非 0 值表示定长运动，`+0` / `-0` 表示持续旋转直到 `stop`
 - `accel`：`rpm/s`
 - `decel`：`rpm/s`
 - `rpm`：`rpm`
 
 当前方向约定：
 
-- `turn 10`：顺时针
-- `turn -10`：逆时针
+- `move 10`：顺时针定长运动
+- `move -10`：逆时针定长运动
+- `move +0`：顺时针持续旋转，直到 `stop`
+- `move -0`：逆时针持续旋转，直到 `stop`
 
 ### 夹爪
 
@@ -99,7 +92,7 @@ clamp readreg [addr]
 clamp open
 clamp close
 clamp move [openPercentage: 0~100(%)]
-clamp grip [load]
+clamp grip [load] [openPercentage]
 clamp release
 clamp set [speed] [gripStep] [releaseDelta]
 ```
@@ -123,6 +116,11 @@ clamp set [speed] [gripStep] [releaseDelta]
 - `open` / `close` / `move` 到位后会自动取消扭矩使能，避免夹爪继续出力顶住机构。
 - `open` / `close` / `move` 运行中如果负载达到 `70%` 并连续命中 3 次，会判定堵转并自动取消扭矩使能，防止损坏。
 - `grip` 夹取成功后保持扭矩使能，用于维持夹持力。
+- `grip [load] [openPercentage]` 中 `openPercentage` 为可选参数；不填时从当前位置开始精细闭合。
+- `grip` 使用两阶段夹取：可选快速闭合到 `openPercentage`，再用 `10 step` 精细闭合到目标负载的 `60%`，随后进入 PI 保力。
+- 设备快速检测周期固定为 `200ms`；PI 保力、吸盘掉落、电机无进展检测都使用该周期。
+- PI 保力非稳定调整日志最短 `2000ms` 打印一次，稳定保持日志最短 `20000ms` 打印一次；稳定判断为绝对误差 `20`。
+- PI 保力中如果负载连续 5 次低于目标负载的 `40%`，且为了恢复负载累计闭合推进超过 `80 position`，会判定物品掉落并关闭扭矩。
 
 ### EVS08 真空吸盘
 
@@ -132,6 +130,7 @@ vacum grip
 vacum release
 vacum stop
 vacum status
+monitor [intervalMs]
 ```
 
 单位：
@@ -152,6 +151,19 @@ vacum release
 其中 `vacum set 30 70 10` 表示最小真空度 `30%`、最大真空度 `70%`、抓取超时 `1000ms`。
 
 当前实现中，EVS08 两个通道使用相同参数同步动作，不区分单独通道控制。
+
+### Monitor
+
+```text
+monitor
+monitor [intervalMs]
+```
+
+- `monitor` 读取当前监控周期。
+- 吸盘掉落检测：`vac1` 或 `vac2` 任一通道真空度连续 5 个快速检测周期低于等于 `5%` 时，上报 `@fault dev=vacum event=drop` 并停止吸盘。
+- 电机无进展检测：电机运行中原始脉冲位置连续 5 个快速检测周期不变时，上报 `@fault dev=mtor* event=stall` 并停止电机。
+- `monitor [intervalMs]` 保留为监控周期参数命令，当前快速故障检测固定使用 `200ms`，不跟随该参数。
+- 已取消周期性 `@status` 自动打印，仅保留夹爪微调 `@info` 和异常停机 `@fault` 自动上报。
 
 ## 主要特性
 

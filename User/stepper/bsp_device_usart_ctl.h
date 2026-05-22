@@ -64,9 +64,8 @@ typedef struct {
 } DeviceVacumStatus;
 
 DeviceApiResult DeviceApi_StepperStatus(uint8_t motor_id, DeviceStepperStatus *out);
-DeviceApiResult DeviceApi_StepperMove(uint8_t motor_id, int32_t rev_0p1,
-                                      uint32_t accel, uint32_t decel, uint32_t rpm);
-DeviceApiResult DeviceApi_StepperTurn(uint8_t motor_id, int32_t rev_0p1);
+DeviceApiResult DeviceApi_StepperMove(uint8_t motor_id, int32_t rev_0p1);
+DeviceApiResult DeviceApi_StepperRun(uint8_t motor_id, uint8_t dir);
 DeviceApiResult DeviceApi_StepperStop(uint8_t motor_id, int32_t *rev_0p1);
 DeviceApiResult DeviceApi_StepperSetAccel(uint8_t motor_id, uint32_t accel);
 DeviceApiResult DeviceApi_StepperSetDecel(uint8_t motor_id, uint32_t decel);
@@ -78,6 +77,7 @@ DeviceApiResult DeviceApi_ClampMove(uint8_t open_percentage, DeviceClampStatus *
 DeviceApiResult DeviceApi_ClampOpen(DeviceClampStatus *out);
 DeviceApiResult DeviceApi_ClampClose(DeviceClampStatus *out);
 DeviceApiResult DeviceApi_ClampGrip(uint16_t load, DeviceClampStatus *out);
+DeviceApiResult DeviceApi_ClampGripAt(uint16_t load, uint8_t open_percentage, DeviceClampStatus *out);
 DeviceApiResult DeviceApi_ClampRelease(DeviceClampStatus *out);
 DeviceApiResult DeviceApi_ClampSet(uint16_t speed, uint16_t grip_step, uint16_t release_delta);
 

@@ -312,6 +312,89 @@ StepperCmdResult stepper_move_T(uint8_t motor_id, int32_t step, uint32_t accel, 
   return STEPPER_CMD_OK;
 }
 
+StepperCmdResult Stepper_RunContinuous(uint8_t motor_id, uint8_t dir, uint32_t accel, uint32_t speed)
+{
+  int tim_count;
+  uint32_t pulses_per_rev;
+  float alpha;
+  float a_t_x10;
+  float a_sq;
+
+  if (!STEPPER_ID_VALID(motor_id))
+  {
+    return STEPPER_CMD_ID_ERROR;
+  }
+
+  if (motor_status[motor_id].out_ena != TRUE)
+  {
+    return STEPPER_CMD_DISABLED;
+  }
+
+  if (motor_status[motor_id].running == TRUE)
+  {
+    return STEPPER_CMD_BUSY;
+  }
+
+  if ((accel == 0) || (speed == 0))
+  {
+    return STEPPER_CMD_PARAM_ERROR;
+  }
+
+  pulses_per_rev = stepper_pulses_per_rev[motor_id];
+  if (pulses_per_rev == 0)
+  {
+    return STEPPER_CMD_PARAM_ERROR;
+  }
+
+  alpha = (float)(2.0f * 3.14159f / pulses_per_rev);
+  a_t_x10 = (float)(10.0f * alpha * T1_FREQ);
+  a_sq = (float)(2.0f * 100000.0f * alpha);
+
+  srd[motor_id].dir = (dir != 0) ? CCW : CW;
+  MOTOR_DIR(motor_id, Stepper_GetDirLevel(motor_id, srd[motor_id].dir));
+
+  srd[motor_id].min_delay = (int32_t)(a_t_x10 / speed);
+  srd[motor_id].step_delay = (int32_t)((T1_FREQ_148 * sqrt(a_sq / accel)) / 10);
+  if ((srd[motor_id].min_delay <= 0) || (srd[motor_id].step_delay <= 0))
+  {
+    return STEPPER_CMD_PARAM_ERROR;
+  }
+
+  if ((srd[motor_id].step_delay / 2) > TIM_PERIOD)
+  {
+    return STEPPER_CMD_PARAM_ERROR;
+  }
+
+  srd[motor_id].decel_start = 0xFFFFFFFFU;
+  srd[motor_id].decel_val = 0;
+  srd[motor_id].accel_count = 0;
+  if (srd[motor_id].step_delay <= srd[motor_id].min_delay)
+  {
+    srd[motor_id].step_delay = srd[motor_id].min_delay;
+    srd[motor_id].run_state = RUN;
+  }
+  else
+  {
+    srd[motor_id].run_state = ACCEL;
+  }
+
+  motor_status[motor_id].running = TRUE;
+  Stepper_UpdateGlobalStatus();
+
+  tim_count = __HAL_TIM_GET_COUNTER(&TIM_TimeBaseStructure);
+  __HAL_TIM_SET_COMPARE(&TIM_TimeBaseStructure,
+                        stepper_hw[motor_id].pul_channel,
+                        tim_count + srd[motor_id].step_delay / 2);
+
+  TIM_CCxChannelCmd(MOTOR_PUL_TIM, stepper_hw[motor_id].pul_channel, TIM_CCx_DISABLE);
+  __HAL_TIM_CLEAR_IT(&TIM_TimeBaseStructure, stepper_hw[motor_id].pul_it);
+  __HAL_TIM_ENABLE_IT(&TIM_TimeBaseStructure, stepper_hw[motor_id].pul_it);
+  __HAL_TIM_MOE_ENABLE(&TIM_TimeBaseStructure);
+  __HAL_TIM_ENABLE(&TIM_TimeBaseStructure);
+
+  return STEPPER_CMD_OK;
+}
+
 /**
   * @brief  速度决策，在TIM8比较中断中按通道调用
   * @param  motor_id 电机编号

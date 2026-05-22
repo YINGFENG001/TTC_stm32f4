@@ -76,6 +76,31 @@ typedef struct {
   uint16_t release_delta;
 } ClampParam;
 
+typedef struct {
+  uint8_t active;
+  uint16_t target_load;
+  uint8_t low_load_hits;
+  int16_t integral;
+  uint16_t last_target_pos;
+  uint16_t low_load_start_pos;
+  int16_t last_load_abs;
+  uint32_t last_adjust_print_tick;
+  uint32_t last_stable_print_tick;
+  BusServoStatus last_status;
+} ClampHoldContext;
+
+typedef struct {
+  uint8_t active;
+  uint8_t drop_hits;
+  Evs08Status last_status;
+} VacumHoldContext;
+
+typedef struct {
+  uint8_t active;
+  int32_t last_position;
+  uint8_t no_progress_hits;
+} StepperMonitorContext;
+
 /* 串口层维护的设备状态快照 */
 typedef struct {
   DeviceId id;           /* 设备编号 */
@@ -94,6 +119,28 @@ typedef struct {
 
 #define INPUT_REV_SCALE                10
 #define MTOR_MAX_OUTPUT_REV_0P1        100000
+#define DEVICE_MONITOR_INTERVAL_DEFAULT_MS 2000U
+#define DEVICE_MONITOR_INTERVAL_MIN_MS 1000U
+#define DEVICE_MONITOR_INTERVAL_MAX_MS 60000U
+#define DEVICE_FAST_CHECK_INTERVAL_MS  200U
+#define DEVICE_STALL_HIT_LIMIT         5U
+#define CLAMP_DROP_LOW_LOAD_PERCENT    40U
+#define CLAMP_DROP_LOW_LOAD_HITS       5U
+#define CLAMP_DROP_RECOVERY_POS_DELTA  80U
+#define CLAMP_GRIP_FINE_STEP           10U
+#define CLAMP_GRIP_PRELOAD_PERCENT     60U
+#define CLAMP_GRIP_FAST_STOP_PERCENT   30U
+#define CLAMP_HOLD_ADJUST_PRINT_INTERVAL_MS 2000U
+#define CLAMP_HOLD_STABLE_PRINT_INTERVAL_MS 20000U
+#define CLAMP_HOLD_STABLE_ERROR        20
+#define CLAMP_HOLD_KP_NUM              10
+#define CLAMP_HOLD_KI_NUM              2
+#define CLAMP_HOLD_GAIN_DEN            100
+#define CLAMP_HOLD_INTEGRAL_LIMIT      1000
+#define CLAMP_HOLD_DELTA_LIMIT         15
+#define VACUM_DROP_PERCENT_LIMIT       5U
+#define DEVICE_FAULT_STALL             1001U
+#define DEVICE_FAULT_DROP              1002U
 
 static EndDevice devices[DEVICE_NUM] = {
   {DEVICE_MTOR1, "mtor1", DEVICE_TYPE_STEPPER, DEV_IDLE,      TRUE, 0, 0, 0, 0, FALSE, 0, 0},
@@ -122,6 +169,14 @@ static ClampParam clamp_param = {
   GRIPPER_GRIP_STEP_DEFAULT,
   GRIPPER_RELEASE_DELTA_DEFAULT
 };
+
+static ClampHoldContext clamp_hold = {FALSE, 0, 0, 0, 0, 0, 0, 0, 0, {0}};
+static VacumHoldContext vacum_hold = {FALSE, 0, {0}};
+static StepperMonitorContext stepper_monitor[STEPPER_NUM] = {
+  {FALSE, 0, 0},
+  {FALSE, 0, 0}
+};
+static uint32_t device_monitor_interval_ms = DEVICE_MONITOR_INTERVAL_DEFAULT_MS;
 
 static void Stepper_ApplyMechanicalConfig(void)
 {
@@ -157,8 +212,20 @@ static const char *Stepper_ResultName(StepperCmdResult result)
 }
 
 static void Clamp_PrintStatusFields(const BusServoStatus *status_data);
+static void Clamp_FillExtraStatus(uint8_t servo_id, BusServoStatus *status_data);
+static uint16_t Clamp_OpenPercentToPosition(uint8_t open_percentage);
 static void Vacum_Command(uint8_t device_id, int argc, char *argv[]);
 static void Device_PrintFullStatus(void);
+static void Clamp_HoldBegin(uint16_t target_load, const BusServoStatus *status_data);
+static void Clamp_HoldEnd(void);
+static GripperResult Clamp_GripTwoStage(uint8_t servo_id, uint16_t load_threshold,
+                                        uint8_t has_open_percentage, uint8_t open_percentage,
+                                        BusServoStatus *final_status, BusServoResult *servo_result);
+static void Vacum_HoldBegin(void);
+static void Vacum_HoldEnd(void);
+static void Clamp_HoldTask(uint32_t now);
+static void Vacum_MonitorTask(uint32_t now);
+static void Device_MonitorTask(uint32_t now);
 
 static int Device_FindByName(const char *name)
 {
@@ -296,10 +363,542 @@ static uint32_t Stepper_CalcInitialStepDelay(uint8_t motor_id, uint32_t accel_in
   return (uint32_t)((T1_FREQ_148 * sqrt(a_sq / accel_internal)) / 10.0f);
 }
 
+static uint8_t Stepper_ParseMoveRev(const char *text, int32_t *rev_0p1,
+                                    uint8_t *continuous, uint8_t *dir)
+{
+  if ((text == 0) || (rev_0p1 == 0) || (continuous == 0) || (dir == 0))
+  {
+    return FALSE;
+  }
+
+  if (strcmp(text, "+0") == 0)
+  {
+    *rev_0p1 = 0;
+    *continuous = TRUE;
+    *dir = CW;
+    return TRUE;
+  }
+
+  if (strcmp(text, "-0") == 0)
+  {
+    *rev_0p1 = 0;
+    *continuous = TRUE;
+    *dir = CCW;
+    return TRUE;
+  }
+
+  *rev_0p1 = atoi(text);
+  if (*rev_0p1 == 0)
+  {
+    return FALSE;
+  }
+
+  *continuous = FALSE;
+  *dir = (*rev_0p1 < 0) ? CCW : CW;
+  return TRUE;
+}
+
+static int16_t Device_Abs16(int16_t value)
+{
+  return (value < 0) ? (int16_t)-value : value;
+}
+
+static uint16_t Clamp_LimitPosition(int32_t position)
+{
+  if (position < GRIPPER_POS_OPEN_MAX)
+  {
+    return GRIPPER_POS_OPEN_MAX;
+  }
+  if (position > GRIPPER_POS_CLOSE_MIN)
+  {
+    return GRIPPER_POS_CLOSE_MIN;
+  }
+  return (uint16_t)position;
+}
+
+static uint16_t Clamp_LoadPercent(uint16_t load, uint16_t percent)
+{
+  return (uint16_t)(((uint32_t)load * percent) / 100U);
+}
+
+static int16_t Clamp_LimitDelta(int32_t delta)
+{
+  if (delta > CLAMP_HOLD_DELTA_LIMIT)
+  {
+    return CLAMP_HOLD_DELTA_LIMIT;
+  }
+  if (delta < -CLAMP_HOLD_DELTA_LIMIT)
+  {
+    return -CLAMP_HOLD_DELTA_LIMIT;
+  }
+  return (int16_t)delta;
+}
+
+static int16_t Clamp_LimitIntegral(int32_t integral)
+{
+  if (integral > CLAMP_HOLD_INTEGRAL_LIMIT)
+  {
+    return CLAMP_HOLD_INTEGRAL_LIMIT;
+  }
+  if (integral < -CLAMP_HOLD_INTEGRAL_LIMIT)
+  {
+    return -CLAMP_HOLD_INTEGRAL_LIMIT;
+  }
+  return (int16_t)integral;
+}
+
+static GripperResult Clamp_ReadServoStatus(uint8_t servo_id, BusServoStatus *status_data,
+                                           BusServoResult *servo_result)
+{
+  BusServoResult result;
+
+  result = BusServo_ReadStatus(servo_id, status_data, 0);
+  if (servo_result != 0)
+  {
+    *servo_result = result;
+  }
+  if (result != BUS_SERVO_OK)
+  {
+    return GRIPPER_STATUS_ERROR;
+  }
+
+  Clamp_FillExtraStatus(servo_id, status_data);
+  return GRIPPER_OK;
+}
+
+static void Clamp_HoldBegin(uint16_t target_load, const BusServoStatus *status_data)
+{
+  clamp_hold.active = TRUE;
+  clamp_hold.target_load = target_load;
+  clamp_hold.low_load_hits = 0;
+  clamp_hold.integral = 0;
+  clamp_hold.last_target_pos = 0;
+  clamp_hold.low_load_start_pos = 0;
+  clamp_hold.last_adjust_print_tick = 0;
+  clamp_hold.last_stable_print_tick = 0;
+  if (status_data != 0)
+  {
+    clamp_hold.last_status = *status_data;
+    clamp_hold.last_target_pos = Clamp_LimitPosition(status_data->position);
+    clamp_hold.last_load_abs = Device_Abs16(status_data->load);
+  }
+  devices[DEVICE_CLAMP].state = DEV_RUNNING;
+}
+
+static void Clamp_HoldEnd(void)
+{
+  clamp_hold.active = FALSE;
+  clamp_hold.target_load = 0;
+  clamp_hold.low_load_hits = 0;
+  clamp_hold.integral = 0;
+  clamp_hold.last_target_pos = 0;
+  clamp_hold.low_load_start_pos = 0;
+  clamp_hold.last_load_abs = 0;
+  clamp_hold.last_adjust_print_tick = 0;
+  clamp_hold.last_stable_print_tick = 0;
+}
+
+static GripperResult Clamp_GripTwoStage(uint8_t servo_id, uint16_t load_threshold,
+                                        uint8_t has_open_percentage, uint8_t open_percentage,
+                                        BusServoStatus *final_status, BusServoResult *servo_result)
+{
+  BusServoResult result;
+  GripperResult grip_result;
+  BusServoStatus status_data;
+  uint16_t target_pos;
+  uint16_t load_abs;
+  uint16_t preload_load;
+  uint16_t fast_stop_load;
+  uint16_t loops;
+  uint16_t i;
+
+  if ((load_threshold < GRIPPER_GRIP_LOAD_MIN) ||
+      (load_threshold > GRIPPER_GRIP_LOAD_MAX) ||
+      (open_percentage > 100))
+  {
+    return GRIPPER_RANGE_ERROR;
+  }
+
+  result = BusServo_SetTorqueEnable(servo_id, 1);
+  if (servo_result != 0)
+  {
+    *servo_result = result;
+  }
+  if (result != BUS_SERVO_OK)
+  {
+    return GRIPPER_TORQUE_ON_ERROR;
+  }
+
+  grip_result = Clamp_ReadServoStatus(servo_id, &status_data, servo_result);
+  if (grip_result != GRIPPER_OK)
+  {
+    return grip_result;
+  }
+  if (final_status != 0)
+  {
+    *final_status = status_data;
+  }
+
+  fast_stop_load = Clamp_LoadPercent(load_threshold, CLAMP_GRIP_FAST_STOP_PERCENT);
+  preload_load = Clamp_LoadPercent(load_threshold, CLAMP_GRIP_PRELOAD_PERCENT);
+
+  if (has_open_percentage == TRUE)
+  {
+    target_pos = Clamp_OpenPercentToPosition(open_percentage);
+    result = BusServo_MoveRaw(servo_id, target_pos, clamp_param.speed);
+    if (servo_result != 0)
+    {
+      *servo_result = result;
+    }
+    if (result != BUS_SERVO_OK)
+    {
+      return GRIPPER_MOVE_ERROR;
+    }
+
+    loops = (uint16_t)(GRIPPER_MOVE_TIMEOUT_MS / GRIPPER_POLL_INTERVAL_MS);
+    if (loops == 0)
+    {
+      loops = 1;
+    }
+
+    for (i = 0; i < loops; i++)
+    {
+      delay_ms(GRIPPER_POLL_INTERVAL_MS);
+      grip_result = Clamp_ReadServoStatus(servo_id, &status_data, servo_result);
+      if (grip_result != GRIPPER_OK)
+      {
+        return grip_result;
+      }
+      if (final_status != 0)
+      {
+        *final_status = status_data;
+      }
+
+      load_abs = (uint16_t)Device_Abs16(status_data.load);
+      if ((load_abs >= fast_stop_load) ||
+          (Device_Abs16((int16_t)(target_pos - status_data.position)) <= GRIPPER_MOVE_TOLERANCE))
+      {
+        break;
+      }
+    }
+  }
+
+  target_pos = Clamp_LimitPosition(status_data.position);
+  while (target_pos < GRIPPER_POS_CLOSE_MIN)
+  {
+    load_abs = (uint16_t)Device_Abs16(status_data.load);
+    if (load_abs >= preload_load)
+    {
+      return GRIPPER_OK;
+    }
+
+    target_pos = Clamp_LimitPosition((int32_t)target_pos + CLAMP_GRIP_FINE_STEP);
+    result = BusServo_MoveRaw(servo_id, target_pos, clamp_param.speed);
+    if (servo_result != 0)
+    {
+      *servo_result = result;
+    }
+    if (result != BUS_SERVO_OK)
+    {
+      return GRIPPER_MOVE_ERROR;
+    }
+
+    delay_ms(GRIPPER_POLL_INTERVAL_MS);
+    grip_result = Clamp_ReadServoStatus(servo_id, &status_data, servo_result);
+    if (grip_result != GRIPPER_OK)
+    {
+      return grip_result;
+    }
+    if (final_status != 0)
+    {
+      *final_status = status_data;
+    }
+  }
+
+  return (Device_Abs16(status_data.load) >= (int16_t)preload_load) ? GRIPPER_OK : GRIPPER_NO_OBJECT;
+}
+
+static void Vacum_HoldBegin(void)
+{
+  vacum_hold.active = TRUE;
+  vacum_hold.drop_hits = 0;
+  devices[DEVICE_VACUM].state = DEV_RUNNING;
+}
+
+static void Vacum_HoldEnd(void)
+{
+  vacum_hold.active = FALSE;
+  vacum_hold.drop_hits = 0;
+}
+
+static void StepperMonitor_Reset(uint8_t motor_id)
+{
+  if (!STEPPER_ID_VALID(motor_id))
+  {
+    return;
+  }
+
+  stepper_monitor[motor_id].active = FALSE;
+  stepper_monitor[motor_id].last_position = stepPosition[motor_id];
+  stepper_monitor[motor_id].no_progress_hits = 0;
+}
+
+static void Clamp_HoldTask(uint32_t now)
+{
+  static uint32_t last_control_tick = 0;
+  uint8_t servo_error;
+  BusServoResult result;
+  BusServoStatus status_data;
+  int16_t load_abs;
+  int16_t error;
+  int16_t delta_pos;
+  int32_t pi_out;
+  uint16_t low_load_limit;
+  uint16_t recovery_delta;
+  uint16_t fault_target_load;
+  uint16_t next_pos;
+
+  if (clamp_hold.active != TRUE)
+  {
+    return;
+  }
+
+  if ((now - last_control_tick) < DEVICE_FAST_CHECK_INTERVAL_MS)
+  {
+    return;
+  }
+  last_control_tick = now;
+
+  servo_error = 0;
+  result = BusServo_ReadStatus(GRIPPER_SERVO_ID_DEFAULT, &status_data, &servo_error);
+  if (result != BUS_SERVO_OK)
+  {
+    devices[DEVICE_CLAMP].state = DEV_ERROR;
+    devices[DEVICE_CLAMP].error_code = result;
+    Clamp_HoldEnd();
+    (void)BusServo_SetTorqueEnable(GRIPPER_SERVO_ID_DEFAULT, 0);
+    printf("\n@fault dev=clamp event=status_error result=%s servo_err=0x%02X action=torque_off",
+           BusServo_ResultName(result), servo_error);
+    return;
+  }
+
+  Clamp_FillExtraStatus(GRIPPER_SERVO_ID_DEFAULT, &status_data);
+  clamp_hold.last_status = status_data;
+  devices[DEVICE_CLAMP].position = status_data.position;
+  devices[DEVICE_CLAMP].target = status_data.position;
+  devices[DEVICE_CLAMP].value = status_data.status;
+  devices[DEVICE_CLAMP].error_code = 0;
+  devices[DEVICE_CLAMP].state = DEV_RUNNING;
+
+  load_abs = Device_Abs16(status_data.load);
+  error = (int16_t)clamp_hold.target_load - load_abs;
+  if (Device_Abs16(error) <= CLAMP_HOLD_STABLE_ERROR)
+  {
+    clamp_hold.integral = 0;
+    clamp_hold.low_load_hits = 0;
+    clamp_hold.low_load_start_pos = 0;
+    clamp_hold.last_load_abs = load_abs;
+    clamp_hold.last_target_pos = Clamp_LimitPosition(status_data.position);
+    if ((clamp_hold.last_stable_print_tick == 0) ||
+        ((now - clamp_hold.last_stable_print_tick) >= CLAMP_HOLD_STABLE_PRINT_INTERVAL_MS))
+    {
+      clamp_hold.last_stable_print_tick = now;
+      printf("\n@info dev=clamp event=hold_stable load=%d target=%u error=%d pos=%d",
+             status_data.load,
+             clamp_hold.target_load,
+             error,
+             status_data.position);
+    }
+    return;
+  }
+
+  clamp_hold.integral = Clamp_LimitIntegral((int32_t)clamp_hold.integral + error);
+  pi_out = ((int32_t)CLAMP_HOLD_KP_NUM * error) +
+           ((int32_t)CLAMP_HOLD_KI_NUM * clamp_hold.integral);
+  delta_pos = Clamp_LimitDelta(pi_out / CLAMP_HOLD_GAIN_DEN);
+  if (delta_pos == 0)
+  {
+    delta_pos = (error > 0) ? 1 : -1;
+  }
+
+  if (clamp_hold.last_target_pos == 0)
+  {
+    clamp_hold.last_target_pos = Clamp_LimitPosition(status_data.position);
+  }
+  next_pos = Clamp_LimitPosition((int32_t)clamp_hold.last_target_pos + delta_pos);
+
+  low_load_limit = Clamp_LoadPercent(clamp_hold.target_load, CLAMP_DROP_LOW_LOAD_PERCENT);
+  if ((load_abs < low_load_limit) && (delta_pos > 0))
+  {
+    if (clamp_hold.low_load_hits == 0)
+    {
+      clamp_hold.low_load_start_pos = clamp_hold.last_target_pos;
+    }
+    clamp_hold.low_load_hits++;
+    recovery_delta = (next_pos >= clamp_hold.low_load_start_pos) ?
+                     (uint16_t)(next_pos - clamp_hold.low_load_start_pos) : 0;
+    if ((clamp_hold.low_load_hits >= CLAMP_DROP_LOW_LOAD_HITS) &&
+        (recovery_delta >= CLAMP_DROP_RECOVERY_POS_DELTA))
+    {
+      fault_target_load = clamp_hold.target_load;
+      Clamp_HoldEnd();
+      (void)BusServo_SetTorqueEnable(GRIPPER_SERVO_ID_DEFAULT, 0);
+      devices[DEVICE_CLAMP].state = DEV_ERROR;
+      devices[DEVICE_CLAMP].error_code = DEVICE_FAULT_DROP;
+      printf("\n@fault dev=clamp event=drop load=%d target=%u pos=%d recover=%u action=torque_off",
+             status_data.load,
+             fault_target_load,
+             status_data.position,
+             recovery_delta);
+      return;
+    }
+  }
+  else
+  {
+    clamp_hold.low_load_hits = 0;
+    clamp_hold.low_load_start_pos = 0;
+  }
+
+  result = BusServo_MoveRaw(GRIPPER_SERVO_ID_DEFAULT, next_pos, clamp_param.speed);
+  if (result == BUS_SERVO_OK)
+  {
+    clamp_hold.last_target_pos = next_pos;
+    clamp_hold.last_load_abs = load_abs;
+    devices[DEVICE_CLAMP].target = next_pos;
+    delay_ms(GRIPPER_POLL_INTERVAL_MS);
+    if (Clamp_ReadServoStatus(GRIPPER_SERVO_ID_DEFAULT, &status_data, &result) == GRIPPER_OK)
+    {
+      load_abs = Device_Abs16(status_data.load);
+      error = (int16_t)clamp_hold.target_load - load_abs;
+      clamp_hold.last_status = status_data;
+      clamp_hold.last_load_abs = load_abs;
+      devices[DEVICE_CLAMP].position = status_data.position;
+      devices[DEVICE_CLAMP].value = status_data.status;
+      devices[DEVICE_CLAMP].error_code = 0;
+    }
+    if ((clamp_hold.last_adjust_print_tick == 0) ||
+        ((now - clamp_hold.last_adjust_print_tick) >= CLAMP_HOLD_ADJUST_PRINT_INTERVAL_MS))
+    {
+      clamp_hold.last_adjust_print_tick = now;
+      printf("\n@info dev=clamp event=hold_pi load=%d target=%u error=%d pos=%d",
+             status_data.load,
+             clamp_hold.target_load,
+             error,
+             status_data.position);
+    }
+  }
+}
+
+static void Vacum_MonitorTask(uint32_t now)
+{
+  static uint32_t last_tick = 0;
+  ModbusResult result;
+  Evs08Status status_data;
+
+  if (vacum_hold.active != TRUE)
+  {
+    return;
+  }
+
+  if ((now - last_tick) < DEVICE_FAST_CHECK_INTERVAL_MS)
+  {
+    return;
+  }
+  last_tick = now;
+
+  result = Evs08_ReadStatus(&status_data);
+  if (result != MODBUS_OK)
+  {
+    devices[DEVICE_VACUM].state = DEV_ERROR;
+    devices[DEVICE_VACUM].error_code = result;
+    Vacum_HoldEnd();
+    (void)Evs08_Stop();
+    printf("\n@fault dev=vacum event=status_error result=%s action=stop",
+           Evs08_ResultName(result));
+    return;
+  }
+
+  vacum_hold.last_status = status_data;
+  devices[DEVICE_VACUM].enabled = (status_data.ch1_enabled || status_data.ch2_enabled) ? TRUE : FALSE;
+  devices[DEVICE_VACUM].value = status_data.ch1_status_reg;
+  devices[DEVICE_VACUM].error_code = 0;
+  devices[DEVICE_VACUM].state = DEV_RUNNING;
+
+  if ((status_data.ch1_vac_percent <= VACUM_DROP_PERCENT_LIMIT) ||
+      (status_data.ch2_vac_percent <= VACUM_DROP_PERCENT_LIMIT))
+  {
+    vacum_hold.drop_hits++;
+    if (vacum_hold.drop_hits >= DEVICE_STALL_HIT_LIMIT)
+    {
+      Vacum_HoldEnd();
+      (void)Evs08_Stop();
+      devices[DEVICE_VACUM].state = DEV_ERROR;
+      devices[DEVICE_VACUM].error_code = DEVICE_FAULT_DROP;
+      printf("\n@fault dev=vacum event=drop vac1=%u vac2=%u obj1=%u obj2=%u action=stop",
+             status_data.ch1_vac_percent,
+             status_data.ch2_vac_percent,
+             status_data.ch1_obj,
+             status_data.ch2_obj);
+    }
+    return;
+  }
+  vacum_hold.drop_hits = 0;
+}
+
+static void Device_MonitorTask(uint32_t now)
+{
+  static uint32_t last_check_tick = 0;
+  uint8_t i;
+
+  if ((now - last_check_tick) >= DEVICE_FAST_CHECK_INTERVAL_MS)
+  {
+    last_check_tick = now;
+    for (i = 0; i < STEPPER_NUM; i++)
+    {
+      if (motor_status[i].running == TRUE)
+      {
+        if (stepper_monitor[i].active != TRUE)
+        {
+          stepper_monitor[i].active = TRUE;
+          stepper_monitor[i].last_position = stepPosition[i];
+          stepper_monitor[i].no_progress_hits = 0;
+        }
+        else if (stepPosition[i] == stepper_monitor[i].last_position)
+        {
+          stepper_monitor[i].no_progress_hits++;
+          if (stepper_monitor[i].no_progress_hits >= DEVICE_STALL_HIT_LIMIT)
+          {
+            (void)Stepper_Stop(i);
+            devices[i].state = DEV_ERROR;
+            devices[i].error_code = DEVICE_FAULT_STALL;
+            printf("\n@fault dev=%s event=stall pos=", devices[i].name);
+            PrintFixed1Signed(devices[i].position);
+            printf(" target=");
+            PrintFixed1Signed(devices[i].target);
+            printf(" action=stop");
+            StepperMonitor_Reset(i);
+          }
+        }
+        else
+        {
+          stepper_monitor[i].last_position = stepPosition[i];
+          stepper_monitor[i].no_progress_hits = 0;
+        }
+      }
+      else
+      {
+        StepperMonitor_Reset(i);
+      }
+    }
+  }
+}
+
 void Device_Task(void)
 {
   uint8_t i;
+  uint32_t now;
 
+  now = HAL_GetTick();
   Stepper_ApplyMechanicalConfig();
 
   for (i = 0; i < STEPPER_NUM; i++)
@@ -324,6 +923,10 @@ void Device_Task(void)
       devices[i].state = DEV_IDLE;
     }
   }
+
+  Clamp_HoldTask(now);
+  Vacum_MonitorTask(now);
+  Device_MonitorTask(now);
 }
 
 void Device_ReportDone(void)
@@ -460,25 +1063,19 @@ static void Stepper_PrintLimit(uint8_t motor_id)
 static void ShowCommandHelp(void)
 {
   printf("\n命令说明:");
-  printf("\n  mtor1 turn [rev: -10000~10000(0.1圈)]");
-  printf("\n  mtor1 move [rev: -10000~10000(0.1圈)] [accel: 60~500(rpm/s)] [decel: 60~500(rpm/s)] [rpm: 1~600]");
-  printf("\n  mtor1 stop");
-  printf("\n  mtor1 accel [value: 60~500(rpm/s)]");
-  printf("\n  mtor1 decel [value: 60~500(rpm/s)]");
-  printf("\n  mtor1 rpm [value: 1~600]");
-  printf("\n  mtor2 turn [rev: -10000~10000(0.1圈)]");
-  printf("\n  mtor2 move [rev: -10000~10000(0.1圈)] [accel: 60~500(rpm/s)] [decel: 60~500(rpm/s)] [rpm: 1~600]");
-  printf("\n  mtor2 stop");
-  printf("\n  mtor2 accel [value: 60~500(rpm/s)]");
-  printf("\n  mtor2 decel [value: 60~500(rpm/s)]");
-  printf("\n  mtor2 rpm [value: 1~600]");
+  printf("\n  mtor1/2 move [rev: -10000~10000(0.1圈), +0/-0 continuous]");
+  printf("\n  mtor1/2 stop");
+  printf("\n  mtor1/2 accel [value: 60~500(rpm/s)]");
+  printf("\n  mtor1/2 decel [value: 60~500(rpm/s)]");
+  printf("\n  mtor1/2 rpm [value: 1~600]");
+  printf("\n  mtor1/2 status");
   printf("\n  clamp ping [id: 0~253]");
   printf("\n  clamp status [id: 0~253]");
   printf("\n  clamp readreg [addr: 0~255]");
   printf("\n  clamp open");
   printf("\n  clamp close");
   printf("\n  clamp move [openPercentage: 0~100(%)]");
-  printf("\n  clamp grip [load: 100~900(0.1%%)]");
+  printf("\n  clamp grip [load: 100~900(0.1%%)] [openPercentage: 0~100(%%), optional]");
   printf("\n  clamp release");
   printf("\n  clamp set [speed: 1~3000] [gripStep: 5~100] [releaseDelta: 20~400]");
   printf("\n  vacum set [min_vac:0~100(%%)] [max_vac:0~100(%%)] [timeout:1~255(100ms)]");
@@ -486,8 +1083,9 @@ static void ShowCommandHelp(void)
   printf("\n  vacum release");
   printf("\n  vacum stop");
   printf("\n  vacum status");
+  printf("\n  monitor [intervalMs: 1000~60000]");
   printf("\n  status");
-  printf("\n示例: mtor1 move 50 100 100 100  -> 5.0圈, 100rpm/s, 100rpm/s, 100rpm");
+  printf("\n示例: mtor1 move 50 -> 5.0圈; mtor1 move +0 -> continuous CW until stop");
   printf("\n");
 }
 
@@ -502,7 +1100,7 @@ void ShowHelp(void)
   printf("\n  clamp : 玄雅STS舵机夹爪  TX PC12, RX PD2(UART5), id=10");
   printf("\n  vacum : 钧舵EVS08真空吸盘 TX PC10, RX PC11(UART4, RS485), DE/RE PH9, id=9");
   printf("\n参数说明:");
-  printf("\n  mtor rev   = -10000~10000(0.1圈)，默认 50 = 5.0圈");
+  printf("\n  mtor rev   = -10000~10000(0.1圈)，默认 50 = 5.0圈，+0/-0 持续旋转直到 stop");
   printf("\n       accel = 60~500(rpm/s)，默认 100");
   printf("\n       decel = 60~500(rpm/s)，默认 100");
   printf("\n       rpm   = 1~600(rpm)，默认 100");
@@ -512,6 +1110,7 @@ void ShowHelp(void)
   printf("\n        default  = speed 1000, gripStep 30, releaseDelta 100");
   printf("\n        load     = 0.1%%");
   printf("\n        current  = 6.5mA");
+  printf("\n  fast check = 200ms, vacum/mtor fault hits = 5");
   printf("\n  vacum min/max_vac = 真空度(%%)");
   printf("\n        timeout     = 1~255(100ms)");
 	printf("\n        grip        = 真空吸取");
@@ -774,8 +1373,7 @@ DeviceApiResult DeviceApi_StepperStatus(uint8_t motor_id, DeviceStepperStatus *o
   return DEVICE_API_OK;
 }
 
-DeviceApiResult DeviceApi_StepperMove(uint8_t motor_id, int32_t rev_0p1,
-                                      uint32_t accel, uint32_t decel, uint32_t rpm)
+DeviceApiResult DeviceApi_StepperMove(uint8_t motor_id, int32_t rev_0p1)
 {
   StepperParam param;
 
@@ -785,15 +1383,18 @@ DeviceApiResult DeviceApi_StepperMove(uint8_t motor_id, int32_t rev_0p1,
   }
 
   param.rev_0p1 = rev_0p1;
-  param.accel_rpm_s = accel;
-  param.decel_rpm_s = decel;
-  param.rpm = rpm;
+  param.accel_rpm_s = stepper_cfg[motor_id].param.accel_rpm_s;
+  param.decel_rpm_s = stepper_cfg[motor_id].param.decel_rpm_s;
+  param.rpm = stepper_cfg[motor_id].param.rpm;
   return DeviceApi_StepperStart(motor_id, &param);
 }
 
-DeviceApiResult DeviceApi_StepperTurn(uint8_t motor_id, int32_t rev_0p1)
+DeviceApiResult DeviceApi_StepperRun(uint8_t motor_id, uint8_t dir)
 {
   StepperParam param;
+  uint32_t accel_internal;
+  uint32_t speed_internal;
+  StepperCmdResult result;
 
   if (!STEPPER_ID_VALID(motor_id))
   {
@@ -801,8 +1402,23 @@ DeviceApiResult DeviceApi_StepperTurn(uint8_t motor_id, int32_t rev_0p1)
   }
 
   param = stepper_cfg[motor_id].param;
-  param.rev_0p1 = rev_0p1;
-  return DeviceApi_StepperStart(motor_id, &param);
+  param.rev_0p1 = 1;
+  if ((Stepper_CheckUserRange(motor_id, &param) != TRUE) ||
+      (Stepper_CheckMotorEquivalentRange(motor_id, &param) != TRUE))
+  {
+    return DEVICE_API_RANGE_ERROR;
+  }
+
+  accel_internal = Stepper_RpmPerSecToAccel(motor_id, param.accel_rpm_s);
+  speed_internal = Stepper_RpmToSpeed(motor_id, param.rpm);
+  stepper_cfg[motor_id].param.rev_0p1 = 0;
+  devices[motor_id].target = 0;
+  result = Stepper_RunContinuous(motor_id, dir, accel_internal, speed_internal);
+  if (result == STEPPER_CMD_OK)
+  {
+    devices[motor_id].state = DEV_RUNNING;
+  }
+  return DeviceApi_FromStepperResult(result);
 }
 
 DeviceApiResult DeviceApi_StepperStop(uint8_t motor_id, int32_t *rev_0p1)
@@ -905,11 +1521,10 @@ static void Stepper_Command(uint8_t device_id, int argc, char *argv[])
   uint8_t motor_id;
   uint32_t temp;
   int32_t temp_rev;
-  int32_t step_target;
-  uint32_t accel_internal;
-  uint32_t decel_internal;
-  uint32_t speed_internal;
+  uint8_t continuous;
+  uint8_t dir;
   StepperCmdResult result;
+  DeviceApiResult api_result;
 
   Stepper_ApplyMechanicalConfig();
   motor_id = device_id;
@@ -946,49 +1561,40 @@ static void Stepper_Command(uint8_t device_id, int argc, char *argv[])
   }
 
   /* 运动类命令：更新目标参数，完成范围校验后再启动电机 */
-  if ((strcmp(argv[1], "turn") == 0) || (strcmp(argv[1], "move") == 0))
+  if (strcmp(argv[1], "move") == 0)
   {
-    if ((strcmp(argv[1], "turn") == 0 && argc != 3) ||
-        (strcmp(argv[1], "move") == 0 && argc != 6))
+    if ((argc != 3) || (Stepper_ParseMoveRev(argv[2], &temp_rev, &continuous, &dir) != TRUE))
     {
       printf("\n%s %s param_error", devices[device_id].name, argv[1]);
       return;
     }
 
-    temp_rev = atoi(argv[2]);
-    stepper_cfg[motor_id].param.rev_0p1 = temp_rev;
-
-    if (strcmp(argv[1], "move") == 0)
+    if (continuous == TRUE)
     {
-      stepper_cfg[motor_id].param.accel_rpm_s = atoi(argv[3]);
-      stepper_cfg[motor_id].param.decel_rpm_s = atoi(argv[4]);
-      stepper_cfg[motor_id].param.rpm = atoi(argv[5]);
+      api_result = DeviceApi_StepperRun(motor_id, dir);
+    }
+    else
+    {
+      api_result = DeviceApi_StepperMove(motor_id, temp_rev);
     }
 
-    if ((Stepper_CheckUserRange(motor_id, &stepper_cfg[motor_id].param) != TRUE) ||
-        (Stepper_CheckMotorEquivalentRange(motor_id, &stepper_cfg[motor_id].param) != TRUE))
+    if (api_result == DEVICE_API_RANGE_ERROR)
     {
       printf("\n%s param_range_error", devices[device_id].name);
       Stepper_PrintLimit(motor_id);
       return;
     }
 
-    step_target = Stepper_RevToStep(motor_id, stepper_cfg[motor_id].param.rev_0p1);
-    accel_internal = Stepper_RpmPerSecToAccel(motor_id, stepper_cfg[motor_id].param.accel_rpm_s);
-    decel_internal = Stepper_RpmPerSecToAccel(motor_id, stepper_cfg[motor_id].param.decel_rpm_s);
-    speed_internal = Stepper_RpmToSpeed(motor_id, stepper_cfg[motor_id].param.rpm);
-
-    devices[device_id].target = stepper_cfg[motor_id].param.rev_0p1;
-    result = stepper_move_T(motor_id,
-                            step_target,
-                            accel_internal,
-                            decel_internal,
-                            speed_internal);
-    if (result == STEPPER_CMD_OK)
-    {
-      devices[device_id].state = DEV_RUNNING;
-    }
+    result = (api_result == DEVICE_API_OK) ? STEPPER_CMD_OK :
+             (api_result == DEVICE_API_BUSY) ? STEPPER_CMD_BUSY :
+             (api_result == DEVICE_API_DISABLED) ? STEPPER_CMD_DISABLED :
+             (api_result == DEVICE_API_ID_ERROR) ? STEPPER_CMD_ID_ERROR :
+             STEPPER_CMD_PARAM_ERROR;
     Stepper_PrintStartResult(motor_id, result);
+    if ((api_result == DEVICE_API_OK) && (continuous == TRUE))
+    {
+      printf(" continuous dir=%s", (dir == CCW) ? "ccw" : "cw");
+    }
     return;
   }
 
@@ -1200,7 +1806,8 @@ DeviceApiResult DeviceApi_ClampStatus(uint8_t servo_id, DeviceClampStatus *out)
 
   Clamp_FillExtraStatus(servo_id, &status_data);
   DeviceApi_FillClampStatus(servo_id, &status_data, out);
-  devices[DEVICE_CLAMP].state = (status_data.moving != 0) ? DEV_RUNNING : DEV_IDLE;
+  devices[DEVICE_CLAMP].state = (clamp_hold.active == TRUE) ? DEV_RUNNING :
+                                 ((status_data.moving != 0) ? DEV_RUNNING : DEV_IDLE);
   devices[DEVICE_CLAMP].position = status_data.position;
   devices[DEVICE_CLAMP].target = status_data.position;
   devices[DEVICE_CLAMP].value = status_data.status;
@@ -1215,6 +1822,7 @@ static DeviceApiResult DeviceApi_ClampMovePosition(uint16_t position, DeviceClam
   GripperResult gripper_result;
   DeviceApiResult ret;
 
+  Clamp_HoldEnd();
   memset(&final_status, 0, sizeof(final_status));
   gripper_result = Gripper_MoveFeedback(GRIPPER_SERVO_ID_DEFAULT, position, clamp_param.speed,
                                         &final_status, &servo_result);
@@ -1256,7 +1864,8 @@ DeviceApiResult DeviceApi_ClampClose(DeviceClampStatus *out)
   return DeviceApi_ClampMovePosition(GRIPPER_POS_CLOSE_MIN, out);
 }
 
-DeviceApiResult DeviceApi_ClampGrip(uint16_t load, DeviceClampStatus *out)
+static DeviceApiResult DeviceApi_ClampGripInternal(uint16_t load, uint8_t has_open_percentage,
+                                                   uint8_t open_percentage, DeviceClampStatus *out)
 {
   BusServoResult servo_result;
   BusServoStatus final_status;
@@ -1264,8 +1873,9 @@ DeviceApiResult DeviceApi_ClampGrip(uint16_t load, DeviceClampStatus *out)
   DeviceApiResult ret;
 
   memset(&final_status, 0, sizeof(final_status));
-  gripper_result = Gripper_Grip(GRIPPER_SERVO_ID_DEFAULT, load, clamp_param.speed, clamp_param.grip_step,
-                                &final_status, &servo_result);
+  gripper_result = Clamp_GripTwoStage(GRIPPER_SERVO_ID_DEFAULT, load,
+                                      has_open_percentage, open_percentage,
+                                      &final_status, &servo_result);
   ret = DeviceApi_FromGripperResult(gripper_result, servo_result);
   if (ret == DEVICE_API_OK)
   {
@@ -1274,7 +1884,7 @@ DeviceApiResult DeviceApi_ClampGrip(uint16_t load, DeviceClampStatus *out)
     devices[DEVICE_CLAMP].target = final_status.position;
     devices[DEVICE_CLAMP].value = final_status.status;
     devices[DEVICE_CLAMP].error_code = 0;
-    devices[DEVICE_CLAMP].state = DEV_IDLE;
+    Clamp_HoldBegin(load, &final_status);
   }
   else
   {
@@ -1295,6 +1905,7 @@ DeviceApiResult DeviceApi_ClampRelease(DeviceClampStatus *out)
 
   cur_pos = 0;
   target_pos = 0;
+  Clamp_HoldEnd();
   memset(&final_status, 0, sizeof(final_status));
   gripper_result = Gripper_Release(GRIPPER_SERVO_ID_DEFAULT, clamp_param.release_delta, clamp_param.speed,
                                    &cur_pos, &target_pos, &final_status, &servo_result);
@@ -1314,6 +1925,21 @@ DeviceApiResult DeviceApi_ClampRelease(DeviceClampStatus *out)
     devices[DEVICE_CLAMP].state = DEV_ERROR;
   }
   return ret;
+}
+
+DeviceApiResult DeviceApi_ClampGrip(uint16_t load, DeviceClampStatus *out)
+{
+  return DeviceApi_ClampGripInternal(load, FALSE, 0, out);
+}
+
+DeviceApiResult DeviceApi_ClampGripAt(uint16_t load, uint8_t open_percentage, DeviceClampStatus *out)
+{
+  if (open_percentage > 100)
+  {
+    return DEVICE_API_RANGE_ERROR;
+  }
+
+  return DeviceApi_ClampGripInternal(load, TRUE, open_percentage, out);
 }
 
 DeviceApiResult DeviceApi_ClampSet(uint16_t speed, uint16_t grip_step, uint16_t release_delta)
@@ -1392,7 +2018,8 @@ static void Clamp_Command(uint8_t device_id, int argc, char *argv[])
     if (result == BUS_SERVO_OK)
     {
       Clamp_FillExtraStatus(servo_id, &status_data);
-      devices[device_id].state = (status_data.moving != 0) ? DEV_RUNNING : DEV_IDLE;
+      devices[device_id].state = (clamp_hold.active == TRUE) ? DEV_RUNNING :
+                                 ((status_data.moving != 0) ? DEV_RUNNING : DEV_IDLE);
       devices[device_id].position = status_data.position;
       devices[device_id].value = status_data.status;
       devices[device_id].error_code = 0;
@@ -1475,6 +2102,7 @@ static void Clamp_Command(uint8_t device_id, int argc, char *argv[])
       return;
     }
 
+    Clamp_HoldEnd();
     gripper_result = Gripper_MoveFeedback(servo_id, GRIPPER_POS_OPEN_MAX, clamp_param.speed, &final_status, &servo_result);
     Clamp_PrintMoveResult("open", servo_id, GRIPPER_POS_OPEN_MAX, clamp_param.speed, gripper_result, servo_result, &final_status);
 
@@ -1492,6 +2120,7 @@ static void Clamp_Command(uint8_t device_id, int argc, char *argv[])
       return;
     }
 
+    Clamp_HoldEnd();
     gripper_result = Gripper_MoveFeedback(servo_id, GRIPPER_POS_CLOSE_MIN, clamp_param.speed, &final_status, &servo_result);
     Clamp_PrintMoveResult("close", servo_id, GRIPPER_POS_CLOSE_MIN, clamp_param.speed, gripper_result, servo_result, &final_status);
 
@@ -1518,6 +2147,7 @@ static void Clamp_Command(uint8_t device_id, int argc, char *argv[])
 
     open_percentage = (uint8_t)parsed;
     position = Clamp_OpenPercentToPosition(open_percentage);
+    Clamp_HoldEnd();
     gripper_result = Gripper_MoveFeedback(servo_id, position, clamp_param.speed, &final_status, &servo_result);
     printf("\nclamp move openPercentage=%u", open_percentage);
     Clamp_PrintMoveResult("move", servo_id, position, clamp_param.speed, gripper_result, servo_result, &final_status);
@@ -1531,20 +2161,40 @@ static void Clamp_Command(uint8_t device_id, int argc, char *argv[])
   /* 夹持类命令：grip 通过逐步闭合和负载阈值判断建立夹持，不主动卸力。 */
   if (strcmp(argv[1], "grip") == 0)
   {
-    if (argc != 3)
+    if ((argc != 3) && (argc != 4))
     {
       printf("\nclamp grip param_error");
       return;
     }
 
     load_threshold = (uint16_t)atoi(argv[2]);
+    open_percentage = 0;
+    if (argc == 4)
+    {
+      parsed = atoi(argv[3]);
+      if ((parsed < 0) || (parsed > 100))
+      {
+        printf("\nclamp grip range_error");
+        return;
+      }
+      open_percentage = (uint8_t)parsed;
+    }
 
-    gripper_result = Gripper_Grip(servo_id, load_threshold, clamp_param.speed, clamp_param.grip_step, &final_status, &servo_result);
-    printf("\nclamp grip id=%u load=%u speed=%u step=%u result=%s",
+    gripper_result = Clamp_GripTwoStage(servo_id, load_threshold,
+                                        (argc == 4) ? TRUE : FALSE,
+                                        open_percentage,
+                                        &final_status, &servo_result);
+    printf("\nclamp grip id=%u load=%u",
            servo_id,
-           load_threshold,
+           load_threshold);
+    if (argc == 4)
+    {
+      printf(" openPercentage=%u", open_percentage);
+    }
+    printf(" speed=%u fineStep=%u preload=%u%% result=%s",
            clamp_param.speed,
-           clamp_param.grip_step,
+           CLAMP_GRIP_FINE_STEP,
+           CLAMP_GRIP_PRELOAD_PERCENT,
            Gripper_ResultName(gripper_result));
     if ((gripper_result == GRIPPER_MOVE_ERROR) || (gripper_result == GRIPPER_STATUS_ERROR))
     {
@@ -1561,7 +2211,14 @@ static void Clamp_Command(uint8_t device_id, int argc, char *argv[])
       devices[device_id].target = final_status.position;
     }
     devices[device_id].error_code = (gripper_result == GRIPPER_OK) ? 0 : gripper_result;
-    devices[device_id].state = (gripper_result == GRIPPER_OK) ? DEV_IDLE : DEV_ERROR;
+    if (gripper_result == GRIPPER_OK)
+    {
+      Clamp_HoldBegin(load_threshold, &final_status);
+    }
+    else
+    {
+      devices[device_id].state = DEV_ERROR;
+    }
     return;
   }
 
@@ -1577,6 +2234,7 @@ static void Clamp_Command(uint8_t device_id, int argc, char *argv[])
     cur_pos = 0;
     target_pos = 0;
 
+    Clamp_HoldEnd();
     gripper_result = Gripper_Release(servo_id, clamp_param.release_delta, clamp_param.speed, &cur_pos, &target_pos, &final_status, &servo_result);
     printf("\nclamp release id=%u cur=%d target=%u delta=%u speed=%u result=%s",
            servo_id,
@@ -1695,6 +2353,10 @@ DeviceApiResult DeviceApi_VacumGrip(void)
   result = Evs08_Grip();
   devices[DEVICE_VACUM].state = (result == MODBUS_OK) ? DEV_RUNNING : DEV_ERROR;
   devices[DEVICE_VACUM].error_code = (result == MODBUS_OK) ? 0 : result;
+  if (result == MODBUS_OK)
+  {
+    Vacum_HoldBegin();
+  }
   return DeviceApi_FromModbusResult(result);
 }
 
@@ -1705,6 +2367,10 @@ DeviceApiResult DeviceApi_VacumRelease(void)
   result = Evs08_Release();
   devices[DEVICE_VACUM].state = (result == MODBUS_OK) ? DEV_IDLE : DEV_ERROR;
   devices[DEVICE_VACUM].error_code = (result == MODBUS_OK) ? 0 : result;
+  if (result == MODBUS_OK)
+  {
+    Vacum_HoldEnd();
+  }
   return DeviceApi_FromModbusResult(result);
 }
 
@@ -1715,6 +2381,10 @@ DeviceApiResult DeviceApi_VacumStop(void)
   result = Evs08_Stop();
   devices[DEVICE_VACUM].state = (result == MODBUS_OK) ? DEV_IDLE : DEV_ERROR;
   devices[DEVICE_VACUM].error_code = (result == MODBUS_OK) ? 0 : result;
+  if (result == MODBUS_OK)
+  {
+    Vacum_HoldEnd();
+  }
   return DeviceApi_FromModbusResult(result);
 }
 
@@ -1740,7 +2410,8 @@ DeviceApiResult DeviceApi_VacumStatus(DeviceVacumStatus *out)
   devices[DEVICE_VACUM].enabled = (status_data.ch1_enabled || status_data.ch2_enabled) ? TRUE : FALSE;
   devices[DEVICE_VACUM].value = status_data.ch1_status_reg;
   devices[DEVICE_VACUM].error_code = 0;
-  devices[DEVICE_VACUM].state = (status_data.ch1_busy || status_data.ch2_busy) ? DEV_RUNNING : DEV_IDLE;
+  devices[DEVICE_VACUM].state = (vacum_hold.active == TRUE) ? DEV_RUNNING :
+                                ((status_data.ch1_busy || status_data.ch2_busy) ? DEV_RUNNING : DEV_IDLE);
   return DEVICE_API_OK;
 }
 
@@ -1802,6 +2473,10 @@ static void Vacum_Command(uint8_t device_id, int argc, char *argv[])
     Vacum_PrintResult("grip", result);
     devices[device_id].state = (result == MODBUS_OK) ? DEV_RUNNING : DEV_ERROR;
     devices[device_id].error_code = (result == MODBUS_OK) ? 0 : result;
+    if (result == MODBUS_OK)
+    {
+      Vacum_HoldBegin();
+    }
     return;
   }
 
@@ -1817,6 +2492,10 @@ static void Vacum_Command(uint8_t device_id, int argc, char *argv[])
     Vacum_PrintResult("release", result);
     devices[device_id].state = (result == MODBUS_OK) ? DEV_IDLE : DEV_ERROR;
     devices[device_id].error_code = (result == MODBUS_OK) ? 0 : result;
+    if (result == MODBUS_OK)
+    {
+      Vacum_HoldEnd();
+    }
     return;
   }
 
@@ -1832,6 +2511,10 @@ static void Vacum_Command(uint8_t device_id, int argc, char *argv[])
     Vacum_PrintResult("stop", result);
     devices[device_id].state = (result == MODBUS_OK) ? DEV_IDLE : DEV_ERROR;
     devices[device_id].error_code = (result == MODBUS_OK) ? 0 : result;
+    if (result == MODBUS_OK)
+    {
+      Vacum_HoldEnd();
+    }
     return;
   }
 
@@ -1851,7 +2534,8 @@ static void Vacum_Command(uint8_t device_id, int argc, char *argv[])
       devices[device_id].enabled = (status_data.ch1_enabled || status_data.ch2_enabled) ? TRUE : FALSE;
       devices[device_id].value = status_data.ch1_status_reg;
       devices[device_id].error_code = 0;
-      devices[device_id].state = (status_data.ch1_busy || status_data.ch2_busy) ? DEV_RUNNING : DEV_IDLE;
+      devices[device_id].state = (vacum_hold.active == TRUE) ? DEV_RUNNING :
+                                  ((status_data.ch1_busy || status_data.ch2_busy) ? DEV_RUNNING : DEV_IDLE);
     }
     else
     {
@@ -1884,6 +2568,7 @@ static void Command_Dispatch(char *line)
   int argc;
   int device_id;
   char *token;
+  uint32_t monitor_interval;
 
   argc = 0;
   token = strtok(line, " \r\n");
@@ -1908,6 +2593,38 @@ static void Command_Dispatch(char *line)
   if (strcmp(argv[0], "status") == 0)
   {
     Device_PrintFullStatus();
+    return;
+  }
+
+  if (strcmp(argv[0], "monitor") == 0)
+  {
+    if (argc == 1)
+    {
+      printf("\nmonitor interval=%lums fast_check=%ums fault_hits=%u",
+             (unsigned long)device_monitor_interval_ms,
+             DEVICE_FAST_CHECK_INTERVAL_MS,
+             DEVICE_STALL_HIT_LIMIT);
+      return;
+    }
+    if (argc != 2)
+    {
+      printf("\nmonitor param_error");
+      return;
+    }
+
+    monitor_interval = (uint32_t)atoi(argv[1]);
+    if ((monitor_interval < DEVICE_MONITOR_INTERVAL_MIN_MS) ||
+        (monitor_interval > DEVICE_MONITOR_INTERVAL_MAX_MS))
+    {
+      printf("\nmonitor range_error intervalMs=1000~60000");
+      return;
+    }
+
+    device_monitor_interval_ms = monitor_interval;
+    printf("\nmonitor interval=%lums fast_check=%ums fault_hits=%u",
+           (unsigned long)device_monitor_interval_ms,
+           DEVICE_FAST_CHECK_INTERVAL_MS,
+           DEVICE_STALL_HIT_LIMIT);
     return;
   }
 

@@ -168,8 +168,6 @@ static void Ros_HandleStepper(uint32_t id, const char *dev, int argc, char *argv
 {
   uint8_t motor_id;
   int32_t rev;
-  uint32_t accel;
-  uint32_t decel;
   uint32_t rpm;
   DeviceApiResult ret;
   RosCmdContext ctx;
@@ -201,45 +199,41 @@ static void Ros_HandleStepper(uint32_t id, const char *dev, int argc, char *argv
 
   if (strcmp(argv[0], "move") == 0)
   {
-    if ((argc != 5) ||
-        (Ros_ParseI32(argv[1], &rev) != TRUE) ||
-        (Ros_ParseU32(argv[2], &accel) != TRUE) ||
-        (Ros_ParseU32(argv[3], &decel) != TRUE) ||
-        (Ros_ParseU32(argv[4], &rpm) != TRUE))
+    if (argc != 2)
     {
       Ros_PrintErr(&ctx, "param_error", 0);
       return;
     }
 
-    ret = DeviceApi_StepperMove(motor_id, rev, accel, decel, rpm);
+    if (strcmp(argv[1], "+0") == 0)
+    {
+      ret = DeviceApi_StepperRun(motor_id, CW);
+      rev = 0;
+    }
+    else if (strcmp(argv[1], "-0") == 0)
+    {
+      ret = DeviceApi_StepperRun(motor_id, CCW);
+      rev = 0;
+    }
+    else if ((Ros_ParseI32(argv[1], &rev) == TRUE) && (rev != 0))
+    {
+      ret = DeviceApi_StepperMove(motor_id, rev);
+    }
+    else
+    {
+      Ros_PrintErr(&ctx, "param_error", 0);
+      return;
+    }
+
     if (ret == DEVICE_API_OK)
     {
       DeviceApi_BindStepperRosCmd(motor_id, id, "move");
       Ros_PrintAck(&ctx, "ok");
-      printf(" rev=%ld accel=%lu decel=%lu rpm=%lu",
-             (long)rev, (unsigned long)accel, (unsigned long)decel, (unsigned long)rpm);
-    }
-    else
-    {
-      Ros_PrintErr(&ctx, Ros_ResultName(ret), 0);
-    }
-    return;
-  }
-
-  if (strcmp(argv[0], "turn") == 0)
-  {
-    if ((argc != 2) || (Ros_ParseI32(argv[1], &rev) != TRUE))
-    {
-      Ros_PrintErr(&ctx, "param_error", 0);
-      return;
-    }
-
-    ret = DeviceApi_StepperTurn(motor_id, rev);
-    if (ret == DEVICE_API_OK)
-    {
-      DeviceApi_BindStepperRosCmd(motor_id, id, "turn");
-      Ros_PrintAck(&ctx, "ok");
       printf(" rev=%ld", (long)rev);
+      if ((strcmp(argv[1], "+0") == 0) || (strcmp(argv[1], "-0") == 0))
+      {
+        printf(" continuous=1 dir=%s", (strcmp(argv[1], "-0") == 0) ? "ccw" : "cw");
+      }
     }
     else
     {
@@ -420,18 +414,36 @@ static void Ros_HandleClamp(uint32_t id, int argc, char *argv[])
 
   if (strcmp(argv[0], "grip") == 0)
   {
-    if ((argc != 2) || (Ros_ParseU16(argv[1], &load) != TRUE))
+    if (((argc != 2) && (argc != 3)) || (Ros_ParseU16(argv[1], &load) != TRUE))
     {
       Ros_PrintErr(&ctx, "param_error", 0);
       return;
     }
 
-    ret = DeviceApi_ClampGrip(load, &s);
+    if (argc == 3)
+    {
+      if ((Ros_ParseU16(argv[2], &open_percentage) != TRUE) ||
+          (open_percentage > 100))
+      {
+        Ros_PrintErr(&ctx, "param_error", 0);
+        return;
+      }
+      ret = DeviceApi_ClampGripAt(load, (uint8_t)open_percentage, &s);
+    }
+    else
+    {
+      ret = DeviceApi_ClampGrip(load, &s);
+    }
     if (ret == DEVICE_API_OK)
     {
       Ros_PrintDone(&ctx, "ok");
-      printf(" load=%u pos=%d current=%d state=0x%02X",
-             load, s.pos, s.current, s.state);
+      printf(" load=%u", load);
+      if (argc == 3)
+      {
+        printf(" openPercentage=%u", open_percentage);
+      }
+      printf(" pos=%d current=%d state=0x%02X",
+             s.pos, s.current, s.state);
     }
     else
     {
