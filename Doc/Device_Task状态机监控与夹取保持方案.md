@@ -32,14 +32,7 @@ Vacum_MonitorTask(now);
 #define VACUM_DROP_HIT_LIMIT           5U
 ```
 
-`monitor` 命令保留参数读写能力：
-
-```text
-monitor
-monitor [intervalMs]
-```
-
-当前快速故障检测固定使用 `200ms`，不跟随 `monitor [intervalMs]` 改变。执行 `monitor` 时会打印当前 `interval`、`fast_check` 和 `vacum_drop_hits`。
+当前快速故障检测固定使用 `200ms`，不提供命令行查询或修改入口。
 
 ## 夹爪夹取流程
 

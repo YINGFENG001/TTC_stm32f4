@@ -136,7 +136,6 @@ vacum grip
 vacum release
 vacum stop
 vacum status
-monitor [intervalMs]
 ```
 
 单位：
@@ -158,16 +157,10 @@ vacum release
 
 当前实现中，EVS08 两个通道使用相同参数同步动作，不区分单独通道控制。
 
-### Monitor
+### 自动监控
 
-```text
-monitor
-monitor [intervalMs]
-```
-
-- `monitor` 读取当前监控周期。
 - 吸盘掉落检测：`vac1` 或 `vac2` 任一通道真空度连续 5 个快速检测周期低于等于 `5%` 时，上报 `@fault dev=vacum event=drop` 并停止吸盘。
-- `monitor [intervalMs]` 保留为监控周期参数命令，当前快速故障检测固定使用 `200ms`，不跟随该参数。
+- 当前快速故障检测固定使用 `200ms`，不支持命令行修改。
 - 已取消周期性 `@status` 自动打印，仅保留夹爪微调 `@info` 和异常停机 `@fault` 自动上报。
 
 ## 主要特性

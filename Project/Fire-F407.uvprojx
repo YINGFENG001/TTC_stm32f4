@@ -789,6 +789,11 @@
               <FilePath>..\User\stepper\bsp_device_usart_ctl.c</FilePath>
             </File>
             <File>
+              <FileName>bsp_stepper_ctl.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\stepper\bsp_stepper_ctl.c</FilePath>
+            </File>
+            <File>
               <FileName>bsp_ros_protocol.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\ros\bsp_ros_protocol.c</FilePath>
@@ -809,6 +814,11 @@
               <FilePath>..\User\gripper\bsp_gripper.c</FilePath>
             </File>
             <File>
+              <FileName>bsp_clamp_ctl.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\gripper\bsp_clamp_ctl.c</FilePath>
+            </File>
+            <File>
               <FileName>bsp_rs485.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\rs485\bsp_rs485.c</FilePath>
@@ -822,6 +832,11 @@
               <FileName>bsp_evs08.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\vacum\bsp_evs08.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_vacum_ctl.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\vacum\bsp_vacum_ctl.c</FilePath>
             </File>
           </Files>
         </Group>
