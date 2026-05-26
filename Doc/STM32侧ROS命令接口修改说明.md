@@ -15,14 +15,17 @@
   `@ack`、`@done`、`@state`、`@err`。
 - 新增 `DeviceApiResult` 到 ROS 错误码字符串的映射。
 - 新增步进电机命令处理：
-  `status`、`move`、`turn`、`stop`、`accel`、`decel`、`rpm`。
+  `status`、`move`、`stop`、`accel`、`decel`、`rpm`。
 - 新增夹爪命令处理：
   `status`、`move`、`open`、`close`、`grip`、`release`。
+  - `move [openPos/Pct]` 支持夹爪绝对位置 `700~2048` 或开度百分比 `0%~100%`，其中 `100%` 等同 `700`。
+  - `grip [load] [openPos/Pct]` 中 `openPos/Pct` 为可选参数。
+  - 夹爪状态和动作返回中的位置统一显示为 `openPos/Pct = 700 (100.0%)`。
 - 新增吸盘命令处理：
   `set`、`grip`、`release`、`stop`、`status`。
 - 吸盘设备名同时兼容 `vacum` 和 `vacuum`。
 - 新增全局状态命令 `#<id> status`，依次输出 `mtor1`、`mtor2`、`clamp`、`vacum` 状态，最后输出 `@done id=<id> dev=system cmd=status result=ok`。
-- `move/turn` 步进命令启动成功后调用 `DeviceApi_BindStepperRosCmd()`，绑定命令 id，等待后续完成上报。
+- `move` 步进命令启动成功后调用 `DeviceApi_BindStepperRosCmd()`，绑定命令 id，等待后续完成上报。
 
 ## User/stepper/bsp_device_usart_ctl.h
 
@@ -31,7 +34,7 @@
 - 新增 `DeviceClampStatus`，提供夹爪 id、位置、速度、负载、电压、温度、电流和状态。
 - 新增 `DeviceVacumStatus`，提供吸盘状态寄存器、故障、忙状态、物体检测、真空度、温度和总线电压。
 - 新增步进电机公共 API：
-  `DeviceApi_StepperStatus()`、`DeviceApi_StepperMove()`、`DeviceApi_StepperTurn()`、`DeviceApi_StepperStop()`、`DeviceApi_StepperSetAccel()`、`DeviceApi_StepperSetDecel()`、`DeviceApi_StepperSetRpm()`。
+  `DeviceApi_StepperStatus()`、`DeviceApi_StepperMove()`、`DeviceApi_StepperRun()`、`DeviceApi_StepperStop()`、`DeviceApi_StepperSetAccel()`、`DeviceApi_StepperSetDecel()`、`DeviceApi_StepperSetRpm()`。
 - 新增 `DeviceApi_BindStepperRosCmd()`，用于记录步进电机异步完成事件对应的 ROS 命令。
 - 新增夹爪公共 API：
   `DeviceApi_ClampStatus()`、`DeviceApi_ClampMove()`、`DeviceApi_ClampOpen()`、`DeviceApi_ClampClose()`、`DeviceApi_ClampGrip()`、`DeviceApi_ClampRelease()`。
@@ -89,7 +92,7 @@
 - ROS 侧只解析 `@` 开头的协议行，普通调试日志不要作为 ROS 状态依据。
 - 新增 ROS 命令时优先扩展 `User/ros/bsp_ros_protocol.c`，不要在人工命令处理函数里增加 ROS 输出分支。
 - 新增设备动作时先补 `DeviceApi_*`，再由 ROS 协议层调用，避免复制底层执行逻辑。
-- 步进电机 `move/turn` 是异步动作：启动成功先输出 `@ack`，完成后由 `Device_ReportDone()` 输出 `@done`。
+- 步进电机 `move` 是异步动作：启动成功先输出 `@ack`，完成后由 `Device_ReportDone()` 输出 `@done`。
 - 夹爪和吸盘当前动作是同步调用：动作完成或底层调用返回后直接输出 `@done` 或 `@ack`。
 - 全局 `#<id> status` 必须以 `@done id=<id> dev=system cmd=status result=ok` 结束，避免 ROS 侧一直等待。
-- 协议字段保持无中文、无单位后缀、无空格值，方便 ROS 端稳定解析。
+- 协议字段保持无中文；夹爪位置字段当前使用 `openPos/Pct = pos (pct%)` 的双格式显示。

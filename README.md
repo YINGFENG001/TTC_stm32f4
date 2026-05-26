@@ -74,7 +74,7 @@ mtor1/2 status
 - `rev`：`0.1圈`，普通非 0 值表示定长运动，`+0` / `-0` 表示持续旋转直到 `stop`
 - `accel`：`rpm/s`
 - `decel`：`rpm/s`
-- `rpm`：`rpm`
+- `rpm`：输出轴 `rpm`，`mtor1` 范围 `1~600`，`mtor2` 范围 `1~30`
 
 当前方向约定：
 
@@ -82,6 +82,11 @@ mtor1/2 status
 - `move -10`：逆时针定长运动
 - `move +0`：顺时针持续旋转，直到 `stop`
 - `move -0`：逆时针持续旋转，直到 `stop`
+
+当前机械参数：
+
+- `mtor1`：`200步/圈`，`8细分`，`1:1直驱`
+- `mtor2`：`200步/圈`，`8细分`，`20:1减速机`，输出轴 `rpm` 范围 `1~30`，默认 `30`
 
 ### 夹爪
 
@@ -91,15 +96,15 @@ clamp status [id]
 clamp readreg [addr]
 clamp open
 clamp close
-clamp move [openPercentage: 0~100(%)]
-clamp grip [load] [openPercentage]
+clamp move [openPos/Pct]
+clamp grip [load] [openPos/Pct]
 clamp release
 clamp set [speed] [gripStep] [releaseDelta]
 ```
 
 单位：
 
-- `openPercentage`：`0~100`，`0` 闭合，`100` 张开
+- `openPos/Pct`：支持绝对位置 `700~2048` 或开度百分比 `0%~100%`；`700` = `100%` 张开，`2048` = `0%` 闭合，例如 `clamp move 100%` 与 `clamp move 700` 等同
 - `load`：`0.1%`
 - `speed`：`1~3000`，默认 `1000`
 - `gripStep`：`5~100`，默认 `30`
@@ -108,7 +113,7 @@ clamp set [speed] [gripStep] [releaseDelta]
 
 当前夹爪标定：
 
-- `open = 500`
+- `open = 700`
 - `close = 2048`
 
 保护逻辑：
@@ -116,10 +121,11 @@ clamp set [speed] [gripStep] [releaseDelta]
 - `open` / `close` / `move` 到位后会自动取消扭矩使能，避免夹爪继续出力顶住机构。
 - `open` / `close` / `move` 运行中如果负载达到 `70%` 并连续命中 3 次，会判定堵转并自动取消扭矩使能，防止损坏。
 - `grip` 夹取成功后保持扭矩使能，用于维持夹持力。
-- `grip [load] [openPercentage]` 中 `openPercentage` 为可选参数；不填时从当前位置开始精细闭合。
-- `grip` 使用两阶段夹取：可选快速闭合到 `openPercentage`，再用 `10 step` 精细闭合到目标负载的 `60%`，随后进入 PI 保力。
-- 设备快速检测周期固定为 `200ms`；PI 保力、吸盘掉落、电机无进展检测都使用该周期。
-- PI 保力非稳定调整日志最短 `2000ms` 打印一次，稳定保持日志最短 `20000ms` 打印一次；稳定判断为绝对误差 `20`。
+- `status` 和夹爪动作返回中的位置统一显示为 `openPos/Pct = 700 (100.0%)`。
+- `grip [load] [openPos/Pct]` 中 `openPos/Pct` 为可选参数；不填时从当前位置开始精细闭合。
+- `grip` 使用两阶段夹取：可选先运动到 `openPos/Pct`，再用 `10 step` 精细闭合到目标负载的 `60%`，随后进入 PI 保力。
+- 设备快速检测周期固定为 `200ms`；PI 保力和吸盘掉落检测使用该周期。
+- PI 保力非稳定调整日志最短 `2000ms` 打印一次，稳定保持日志最短 `20000ms` 打印一次；稳定判断为负载绝对误差 `20`。
 - PI 保力中如果负载连续 5 次低于目标负载的 `40%`，且为了恢复负载累计闭合推进超过 `80 position`，会判定物品掉落并关闭扭矩。
 
 ### EVS08 真空吸盘
@@ -161,7 +167,6 @@ monitor [intervalMs]
 
 - `monitor` 读取当前监控周期。
 - 吸盘掉落检测：`vac1` 或 `vac2` 任一通道真空度连续 5 个快速检测周期低于等于 `5%` 时，上报 `@fault dev=vacum event=drop` 并停止吸盘。
-- 电机无进展检测：电机运行中原始脉冲位置连续 5 个快速检测周期不变时，上报 `@fault dev=mtor* event=stall` 并停止电机。
 - `monitor [intervalMs]` 保留为监控周期参数命令，当前快速故障检测固定使用 `200ms`，不跟随该参数。
 - 已取消周期性 `@status` 自动打印，仅保留夹爪微调 `@info` 和异常停机 `@fault` 自动上报。
 

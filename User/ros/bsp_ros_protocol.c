@@ -1,5 +1,6 @@
 #include "./ros/bsp_ros_protocol.h"
 #include "./stepper/bsp_device_usart_ctl.h"
+#include "./gripper/bsp_gripper.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -89,6 +90,95 @@ static uint8_t Ros_ParseU8(const char *text, uint8_t *out)
 
   *out = (uint8_t)value;
   return TRUE;
+}
+
+static uint16_t Ros_ClampOpenPctX10(uint16_t position)
+{
+  uint32_t span;
+
+  if (position < GRIPPER_POS_OPEN_MAX)
+  {
+    position = GRIPPER_POS_OPEN_MAX;
+  }
+  if (position > GRIPPER_POS_CLOSE_MIN)
+  {
+    position = GRIPPER_POS_CLOSE_MIN;
+  }
+
+  span = (uint32_t)(GRIPPER_POS_CLOSE_MIN - GRIPPER_POS_OPEN_MAX);
+  return (uint16_t)((((uint32_t)(GRIPPER_POS_CLOSE_MIN - position) * 1000U) + (span / 2U)) / span);
+}
+
+static uint16_t Ros_ClampOpenPctToPosition(uint16_t open_pct)
+{
+  uint32_t span;
+
+  if (open_pct > 100)
+  {
+    open_pct = 100;
+  }
+
+  span = (uint32_t)(GRIPPER_POS_CLOSE_MIN - GRIPPER_POS_OPEN_MAX);
+  return (uint16_t)(GRIPPER_POS_CLOSE_MIN - ((span * open_pct + 50U) / 100U));
+}
+
+static uint8_t Ros_ParseClampPosition(const char *text, uint16_t *position)
+{
+  char *end;
+  unsigned long value;
+
+  if ((text == 0) || (position == 0))
+  {
+    return FALSE;
+  }
+
+  if (text[0] == '-')
+  {
+    return FALSE;
+  }
+
+  value = strtoul(text, &end, 10);
+  if (end == text)
+  {
+    return FALSE;
+  }
+
+  if (*end == '%')
+  {
+    if (*(end + 1) != '\0')
+    {
+      return FALSE;
+    }
+    if (value > 100)
+    {
+      return FALSE;
+    }
+    *position = Ros_ClampOpenPctToPosition((uint16_t)value);
+    return TRUE;
+  }
+
+  if ((*end != '\0') || (value > 65535U))
+  {
+    return FALSE;
+  }
+  if ((value < GRIPPER_POS_OPEN_MAX) || (value > GRIPPER_POS_CLOSE_MIN))
+  {
+    return FALSE;
+  }
+
+  *position = (uint16_t)value;
+  return TRUE;
+}
+
+static void Ros_PrintClampPosition(uint16_t position)
+{
+  uint16_t pct_x10;
+
+  pct_x10 = Ros_ClampOpenPctX10(position);
+  printf(" openPos/Pct = %u (%u.%u%%)",
+         position,
+         pct_x10 / 10U,
+         pct_x10 % 10U);
 }
 
 static void Ros_PrintAck(const RosCmdContext *ctx, const char *result)
@@ -301,17 +391,17 @@ static void Ros_HandleStepper(uint32_t id, const char *dev, int argc, char *argv
   Ros_PrintErr(&ctx, "unknown_action", 0);
 }
 
-static void Ros_PrintClampDone(const RosCmdContext *ctx, uint16_t target,
-                               const DeviceClampStatus *s)
+static void Ros_PrintClampDone(const RosCmdContext *ctx, const DeviceClampStatus *s)
 {
   Ros_PrintDone(ctx, "ok");
-  printf(" target=%u pos=%d load=%d current=%d state=0x%02X",
-         target, s->pos, s->load, s->current, s->state);
+  Ros_PrintClampPosition((uint16_t)s->pos);
+  printf(" load=%d current=%d state=0x%02X",
+         s->load, s->current, s->state);
 }
 
 static void Ros_HandleClamp(uint32_t id, int argc, char *argv[])
 {
-  uint16_t open_percentage;
+  uint16_t position;
   uint16_t speed;
   uint16_t load;
   uint16_t step;
@@ -350,8 +440,10 @@ static void Ros_HandleClamp(uint32_t id, int argc, char *argv[])
     if (ret == DEVICE_API_OK)
     {
       Ros_PrintState(id, "clamp", "ok");
-      printf(" servo_id=%u pos=%d speed=%d load=%d voltage=%u temp=%u current=%d state=0x%02X",
-             s.servo_id, s.pos, s.speed, s.load, s.voltage, s.temp, s.current, s.state);
+      printf(" servo_id=%u", s.servo_id);
+      Ros_PrintClampPosition((uint16_t)s.pos);
+      printf(" speed=%d load=%d voltage=%u temp=%u current=%d state=0x%02X",
+             s.speed, s.load, s.voltage, s.temp, s.current, s.state);
     }
     else
     {
@@ -363,17 +455,16 @@ static void Ros_HandleClamp(uint32_t id, int argc, char *argv[])
   if (strcmp(argv[0], "move") == 0)
   {
     if ((argc != 2) ||
-        (Ros_ParseU16(argv[1], &open_percentage) != TRUE) ||
-        (open_percentage > 100))
+        (Ros_ParseClampPosition(argv[1], &position) != TRUE))
     {
       Ros_PrintErr(&ctx, "param_error", 0);
       return;
     }
 
-    ret = DeviceApi_ClampMove((uint8_t)open_percentage, &s);
+    ret = DeviceApi_ClampMove(position, &s);
     if (ret == DEVICE_API_OK)
     {
-      Ros_PrintClampDone(&ctx, open_percentage, &s);
+      Ros_PrintClampDone(&ctx, &s);
     }
     else
     {
@@ -393,17 +484,16 @@ static void Ros_HandleClamp(uint32_t id, int argc, char *argv[])
     if (strcmp(argv[0], "open") == 0)
     {
       ret = DeviceApi_ClampOpen(&s);
-      open_percentage = 100;
     }
     else
     {
       ret = DeviceApi_ClampClose(&s);
-      open_percentage = 0;
     }
 
     if (ret == DEVICE_API_OK)
     {
-      Ros_PrintClampDone(&ctx, open_percentage, &s);
+      position = (uint16_t)s.pos;
+      Ros_PrintClampDone(&ctx, &s);
     }
     else
     {
@@ -422,13 +512,12 @@ static void Ros_HandleClamp(uint32_t id, int argc, char *argv[])
 
     if (argc == 3)
     {
-      if ((Ros_ParseU16(argv[2], &open_percentage) != TRUE) ||
-          (open_percentage > 100))
+      if (Ros_ParseClampPosition(argv[2], &position) != TRUE)
       {
         Ros_PrintErr(&ctx, "param_error", 0);
         return;
       }
-      ret = DeviceApi_ClampGripAt(load, (uint8_t)open_percentage, &s);
+      ret = DeviceApi_ClampGripAt(load, position, &s);
     }
     else
     {
@@ -440,10 +529,10 @@ static void Ros_HandleClamp(uint32_t id, int argc, char *argv[])
       printf(" load=%u", load);
       if (argc == 3)
       {
-        printf(" openPercentage=%u", open_percentage);
+        Ros_PrintClampPosition(position);
       }
-      printf(" pos=%d current=%d state=0x%02X",
-             s.pos, s.current, s.state);
+      printf(" current=%d state=0x%02X",
+             s.current, s.state);
     }
     else
     {
@@ -464,8 +553,9 @@ static void Ros_HandleClamp(uint32_t id, int argc, char *argv[])
     if (ret == DEVICE_API_OK)
     {
       Ros_PrintDone(&ctx, "ok");
-      printf(" pos=%d current=%d state=0x%02X",
-             s.pos, s.current, s.state);
+      Ros_PrintClampPosition((uint16_t)s.pos);
+      printf(" current=%d state=0x%02X",
+             s.current, s.state);
     }
     else
     {
