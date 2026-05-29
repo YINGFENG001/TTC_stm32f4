@@ -63,18 +63,20 @@ STM32F407 末端设备控制工程，当前包含双路步进电机、1 路串�
 ```text
 mtor1/2 move [rev]
 mtor1/2 stop
-mtor1/2 accel [value]
-mtor1/2 decel [value]
 mtor1/2 rpm [value]
+mtor1/2 set [accel] [decel] [gear] [micro]
 mtor1/2 status
 ```
 
 单位：
 
 - `rev`：`0.1圈`，普通非 0 值表示定长运动，`+0` / `-0` 表示持续旋转直到 `stop`
-- `accel`：`rpm/s`
-- `decel`：`rpm/s`
-- `rpm`：输出轴 `rpm`，`mtor1` 范围 `1~600`，`mtor2` 范围 `1~30`
+- `accel`：`rpm/s`，有效范围由当前 `gear` 和电机轴 `40~1000rpm/s` 动态决定
+- `decel`：`rpm/s`，有效范围由当前 `gear` 和电机轴 `40~1000rpm/s` 动态决定
+- `rpm`：输出轴 `rpm`，上限由当前 `gear` 和电机轴最高 `1500rpm` 动态决定
+- `gear`：减速比，格式如 `20:1`
+- `micro`：驱动器细分，当前默认 `4`
+- 默认值：`1:1` 默认 `rpm=200`、`accel/decel=400`；其他减速比默认值按电机轴等效限制折算，例如 `20:1` 默认 `rpm=30`、`accel/decel=30`
 
 当前方向约定：
 
@@ -82,11 +84,16 @@ mtor1/2 status
 - `move -10`：逆时针定长运动
 - `move +0`：顺时针持续旋转，直到 `stop`
 - `move -0`：逆时针持续旋转，直到 `stop`
+- `move` 和连续运行中的 `rpm` 回显会打印 `dir=CW/CCW`；正数为 `CW`，负数为 `CCW`
+- `move +0/-0` 连续运行期间允许执行 `rpm [value]` 动态调速，调速斜坡使用当前 `set` 保存的 `accel/decel`
+- 连续运行期间 `rpm 0` 表示按 `decel` 减速到停止，`rpm N` 表示目标方向为 `CW`，`rpm -N` 表示按 `decel` 减速后反向到 `CCW` 并按 `accel` 升到 `N rpm`
+- 保存的 `rpm` 永远为正数；定长 `move [rev]` 的方向只由 `rev` 正负决定
+- 定长 `move [rev]` 运行期间暂不支持动态调速，此时执行 `rpm [value]` 会返回 `busy`
 
 当前机械参数：
 
-- `mtor1`：`200步/圈`，`8细分`，`1:1直驱`
-- `mtor2`：`200步/圈`，`8细分`，`20:1减速机`，输出轴 `rpm` 范围 `1~30`，默认 `30`
+- `mtor1`：`200步/圈`，`4细分`，`1:1直驱`
+- `mtor2`：`200步/圈`，`4细分`，`20:1减速机`，默认输出轴 `rpm` 范围 `1~75`，默认 `30`
 
 ### 夹爪
 

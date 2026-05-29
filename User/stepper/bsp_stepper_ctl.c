@@ -41,34 +41,51 @@ typedef struct {
 
 #define INPUT_REV_SCALE                10
 #define MTOR_MAX_OUTPUT_REV_0P1        100000
+#define MTOR_MIN_MICRO_STEP            1
+#define MTOR_MAX_MICRO_STEP            256
+#define MTOR_MIN_GEAR_NUM              1
+#define MTOR_MAX_GEAR_NUM              1000
+#define MTOR_MIN_GEAR_DEN              1
+#define MTOR_MAX_GEAR_DEN              1000
+#define MTOR_MIN_MOTOR_ACCEL_RPM_S     40
+#define MTOR_MAX_MOTOR_ACCEL_RPM_S     1000
+#define MTOR_MAX_MOTOR_RPM             1500
 
 static StepperDeviceConfig stepper_cfg[STEPPER_NUM] = {
   {
-    {200, 8, 1, 1},
-    {-MTOR_MAX_OUTPUT_REV_0P1, MTOR_MAX_OUTPUT_REV_0P1, 1, 600, 60, 500, 60, 500, 600},
-    {50, 100, 100, 100}
+    {200, 4, 1, 1},
+    {-MTOR_MAX_OUTPUT_REV_0P1, MTOR_MAX_OUTPUT_REV_0P1, 1, MTOR_MAX_MOTOR_RPM, MTOR_MIN_MOTOR_ACCEL_RPM_S, MTOR_MAX_MOTOR_ACCEL_RPM_S, MTOR_MIN_MOTOR_ACCEL_RPM_S, MTOR_MAX_MOTOR_ACCEL_RPM_S, MTOR_MAX_MOTOR_RPM},
+    {50, 400, 400, 200}
   },
   {
-    {200, 8, 20, 1},
-    {-MTOR_MAX_OUTPUT_REV_0P1, MTOR_MAX_OUTPUT_REV_0P1, 1, 30, 60, 500, 60, 500, 600},
-    {50, 100, 100, 30}
+    {200, 4, 20, 1},
+    {-MTOR_MAX_OUTPUT_REV_0P1, MTOR_MAX_OUTPUT_REV_0P1, 1, MTOR_MAX_MOTOR_RPM, MTOR_MIN_MOTOR_ACCEL_RPM_S, MTOR_MAX_MOTOR_ACCEL_RPM_S, MTOR_MIN_MOTOR_ACCEL_RPM_S, MTOR_MAX_MOTOR_ACCEL_RPM_S, MTOR_MAX_MOTOR_RPM},
+    {50, 30, 30, 30}
   }
 };
 
 static const char *Stepper_ResultName(StepperCmdResult result);
+static const char *Stepper_DirName(uint8_t dir);
 static uint32_t Stepper_GetMotorPulsesPerRev(uint8_t motor_id);
 static int32_t Stepper_GetPulsesPerOutputRev(uint8_t motor_id);
 static uint32_t Stepper_OutputRpmToMotorRpm(uint8_t motor_id, uint32_t rpm);
+static uint32_t Stepper_GetEffectiveMaxRpm(uint8_t motor_id);
+static uint32_t Stepper_GetEffectiveMinAccel(uint8_t motor_id);
+static uint32_t Stepper_GetEffectiveMaxAccel(uint8_t motor_id);
 static uint32_t Stepper_OutputAccelToMotorAccel(uint8_t motor_id, uint32_t accel_rpm_s);
 static int32_t Stepper_RevToStep(uint8_t motor_id, int32_t rev_0p1);
 static uint32_t Stepper_RpmToSpeed(uint8_t motor_id, uint32_t rpm);
 static uint32_t Stepper_RpmPerSecToAccel(uint8_t motor_id, uint32_t accel_rpm_s);
 static uint32_t Stepper_CalcInitialStepDelay(uint8_t motor_id, uint32_t accel_internal);
 static uint8_t Stepper_ParseMoveRev(const char *text, int32_t *rev_0p1, uint8_t *continuous, uint8_t *dir);
+static uint8_t Stepper_ParseGear(const char *text, uint16_t *gear_num, uint16_t *gear_den);
+static void Stepper_UpdateMotorPulses(uint8_t motor_id);
 static void Stepper_PrintLimit(uint8_t motor_id);
-static void Stepper_PrintParam(uint8_t motor_id);
+static void Stepper_PrintSetting(uint8_t motor_id);
+static void Stepper_PrintRpmSettingValue(uint8_t motor_id, int32_t rpm);
 static void Stepper_PrintStartResult(uint8_t motor_id, StepperCmdResult result);
 static void Stepper_PrintStopResult(uint8_t motor_id, StepperCmdResult result);
+static void Stepper_PrintCommandNewline(void);
 static uint8_t Stepper_CheckUserRange(uint8_t motor_id, const StepperParam *param);
 static uint8_t Stepper_CheckMotorEquivalentRange(uint8_t motor_id, const StepperParam *param);
 static DeviceApiResult DeviceApi_FromStepperResult(StepperCmdResult result);
@@ -78,7 +95,6 @@ void Stepper_ApplyMechanicalConfig(void)
 {
   static uint8_t applied = FALSE;
   uint8_t i;
-  uint32_t pulses_per_motor_rev;
 
   if (applied == TRUE)
   {
@@ -87,8 +103,7 @@ void Stepper_ApplyMechanicalConfig(void)
 
   for (i = 0; i < STEPPER_NUM; i++)
   {
-    pulses_per_motor_rev = (uint32_t)stepper_cfg[i].mech.motor_steps_per_rev * stepper_cfg[i].mech.micro_step;
-    Stepper_SetMotorPulsesPerRev(i, pulses_per_motor_rev);
+    Stepper_UpdateMotorPulses(i);
   }
 
   applied = TRUE;
@@ -105,6 +120,11 @@ static const char *Stepper_ResultName(StepperCmdResult result)
     case STEPPER_CMD_PARAM_ERROR: return "param_error";
     default:                      return "unknown";
   }
+}
+
+static const char *Stepper_DirName(uint8_t dir)
+{
+  return (dir == CCW) ? "CCW" : "CW";
 }
 
 static uint32_t Stepper_GetMotorPulsesPerRev(uint8_t motor_id)
@@ -128,7 +148,59 @@ static uint32_t Stepper_OutputRpmToMotorRpm(uint8_t motor_id, uint32_t rpm)
   const StepperMechanicalConfig *mech;
 
   mech = &stepper_cfg[motor_id].mech;
-  return (uint32_t)((rpm * mech->gear_num) / mech->gear_den);
+  return (uint32_t)(((rpm * mech->gear_num) + mech->gear_den - 1U) / mech->gear_den);
+}
+
+static uint32_t Stepper_GetEffectiveMaxRpm(uint8_t motor_id)
+{
+  const StepperMechanicalConfig *mech;
+  const StepperSafetyLimit *limit;
+  uint32_t motor_limited_rpm;
+
+  mech = &stepper_cfg[motor_id].mech;
+  limit = &stepper_cfg[motor_id].limit;
+  motor_limited_rpm = (uint32_t)((limit->max_motor_rpm * mech->gear_den) / mech->gear_num);
+  if (motor_limited_rpm == 0)
+  {
+    motor_limited_rpm = 1;
+  }
+  if (motor_limited_rpm > limit->max_rpm)
+  {
+    return limit->max_rpm;
+  }
+  return motor_limited_rpm;
+}
+
+static uint32_t Stepper_GetEffectiveMinAccel(uint8_t motor_id)
+{
+  const StepperMechanicalConfig *mech;
+  const StepperSafetyLimit *limit;
+  uint32_t min_accel;
+
+  mech = &stepper_cfg[motor_id].mech;
+  limit = &stepper_cfg[motor_id].limit;
+  min_accel = (uint32_t)(((limit->min_accel_rpm_s * mech->gear_den) + mech->gear_num - 1U) / mech->gear_num);
+  if (min_accel == 0)
+  {
+    min_accel = 1;
+  }
+  return min_accel;
+}
+
+static uint32_t Stepper_GetEffectiveMaxAccel(uint8_t motor_id)
+{
+  const StepperMechanicalConfig *mech;
+  const StepperSafetyLimit *limit;
+  uint32_t max_accel;
+
+  mech = &stepper_cfg[motor_id].mech;
+  limit = &stepper_cfg[motor_id].limit;
+  max_accel = (uint32_t)((limit->max_accel_rpm_s * mech->gear_den) / mech->gear_num);
+  if (max_accel == 0)
+  {
+    max_accel = 1;
+  }
+  return max_accel;
 }
 
 static uint32_t Stepper_OutputAccelToMotorAccel(uint8_t motor_id, uint32_t accel_rpm_s)
@@ -136,7 +208,7 @@ static uint32_t Stepper_OutputAccelToMotorAccel(uint8_t motor_id, uint32_t accel
   const StepperMechanicalConfig *mech;
 
   mech = &stepper_cfg[motor_id].mech;
-  return (uint32_t)((accel_rpm_s * mech->gear_num) / mech->gear_den);
+  return (uint32_t)(((accel_rpm_s * mech->gear_num) + mech->gear_den - 1U) / mech->gear_den);
 }
 
 int32_t Stepper_StepToRev0p1(uint8_t motor_id, int32_t step)
@@ -156,15 +228,15 @@ int32_t Stepper_StepToRev0p1(uint8_t motor_id, int32_t step)
  * 输入层单位约定：
  * 1. rev_0p1      : 0.1 圈（按设备输出轴计算）
  * 2. rpm          : rpm（按设备输出轴计算）
- * 3. accel_rpm_s  : rpm/s（按设备输出轴计算）
- * 4. decel_rpm_s  : rpm/s（按设备输出轴计算）
+ * 3. accel_rpm_s  : rpm/s（按设备输出轴计算，内部按减速比换算到电机轴）
+ * 4. decel_rpm_s  : rpm/s（按设备输出轴计算，内部按减速比换算到电机轴）
  *
  * 当前硬件前提：
  * 1. 系统时钟 SystemCoreClock = 168MHz
  * 2. TIM8 采用输出比较 Toggle 模式输出步进脉冲
  * 3. TIM_PRESCALER = 31，定时器计数频率 = 168MHz / (31 + 1) = 5.25MHz
  * 4. TIM_PERIOD = 0xFFFF，当前使用16位计数器
- * 5. mtor1 为 200步/圈、8细分、1:1直驱；mtor2 为 200步/圈、8细分、20:1减速机
+ * 5. mtor1 为 200步/圈、4细分、1:1直驱；mtor2 为 200步/圈、4细分、20:1减速机
  */
 
 static int32_t Stepper_RevToStep(uint8_t motor_id, int32_t rev_0p1)
@@ -249,53 +321,106 @@ static uint8_t Stepper_ParseMoveRev(const char *text, int32_t *rev_0p1,
   return TRUE;
 }
 
-static void Stepper_PrintLimit(uint8_t motor_id)
+static uint8_t Stepper_ParseGear(const char *text, uint16_t *gear_num, uint16_t *gear_den)
 {
-  const StepperMechanicalConfig *mech;
-  const StepperSafetyLimit *limit;
+  const char *colon;
+  uint32_t num;
+  uint32_t den;
 
-  mech = &stepper_cfg[motor_id].mech;
-  limit = &stepper_cfg[motor_id].limit;
+  if ((text == 0) || (gear_num == 0) || (gear_den == 0))
+  {
+    return FALSE;
+  }
 
-  printf("\n%s limit rev=", devices[motor_id].name);
-  PrintFixed1Signed(limit->min_rev_0p1);
-  printf("~");
-  PrintFixed1Signed(limit->max_rev_0p1);
-  printf(" rpm=%lu~%lu accel=%lu~%lu decel=%lu~%lu gear=%u:%u micro=%u motor_rpm_max=%lu",
-         (unsigned long)limit->min_rpm,
-         (unsigned long)limit->max_rpm,
-         (unsigned long)limit->min_accel_rpm_s,
-         (unsigned long)limit->max_accel_rpm_s,
-         (unsigned long)limit->min_decel_rpm_s,
-         (unsigned long)limit->max_decel_rpm_s,
-         mech->gear_num,
-         mech->gear_den,
-         mech->micro_step,
-         (unsigned long)limit->max_motor_rpm);
+  colon = strchr(text, ':');
+  if (colon == 0)
+  {
+    return FALSE;
+  }
+
+  num = (uint32_t)atoi(text);
+  den = (uint32_t)atoi(colon + 1);
+  if ((num < MTOR_MIN_GEAR_NUM) || (num > MTOR_MAX_GEAR_NUM) ||
+      (den < MTOR_MIN_GEAR_DEN) || (den > MTOR_MAX_GEAR_DEN))
+  {
+    return FALSE;
+  }
+
+  *gear_num = (uint16_t)num;
+  *gear_den = (uint16_t)den;
+  return TRUE;
 }
 
-static void Stepper_PrintParam(uint8_t motor_id)
+static void Stepper_UpdateMotorPulses(uint8_t motor_id)
 {
-  const StepperMechanicalConfig *mech;
+  uint32_t pulses_per_motor_rev;
 
   if (!STEPPER_ID_VALID(motor_id))
   {
     return;
   }
 
-  mech = &stepper_cfg[motor_id].mech;
+  pulses_per_motor_rev = (uint32_t)stepper_cfg[motor_id].mech.motor_steps_per_rev *
+                         stepper_cfg[motor_id].mech.micro_step;
+  Stepper_SetMotorPulsesPerRev(motor_id, pulses_per_motor_rev);
+}
 
-  printf("\n%s param rev=", devices[motor_id].name);
-  PrintFixed1Signed(stepper_cfg[motor_id].param.rev_0p1);
-  printf(" accel=%lurpm/s decel=%lurpm/s rpm=%lurpm gear=%u:%u micro=%u motor_rev_pulse=%lu output_rev_pulse=%ld",
-         (unsigned long)stepper_cfg[motor_id].param.accel_rpm_s,
-         (unsigned long)stepper_cfg[motor_id].param.decel_rpm_s,
-         (unsigned long)stepper_cfg[motor_id].param.rpm,
+static void Stepper_PrintLimit(uint8_t motor_id)
+{
+  const StepperMechanicalConfig *mech;
+  const StepperSafetyLimit *limit;
+  uint32_t max_rpm;
+  uint32_t min_accel;
+  uint32_t max_accel;
+
+  mech = &stepper_cfg[motor_id].mech;
+  limit = &stepper_cfg[motor_id].limit;
+  max_rpm = Stepper_GetEffectiveMaxRpm(motor_id);
+  min_accel = Stepper_GetEffectiveMinAccel(motor_id);
+  max_accel = Stepper_GetEffectiveMaxAccel(motor_id);
+
+  printf("\n%s limit rev=", devices[motor_id].name);
+  PrintFixed1Signed(limit->min_rev_0p1);
+  printf("~");
+  PrintFixed1Signed(limit->max_rev_0p1);
+  printf(" rpm=%lu~%lu accel=%lu~%lu decel=%lu~%lu gear=%u:%u micro=%u motor_rpm_max=%lu motor_accel=%lu~%lu",
+         (unsigned long)limit->min_rpm,
+         (unsigned long)max_rpm,
+         (unsigned long)min_accel,
+         (unsigned long)max_accel,
+         (unsigned long)min_accel,
+         (unsigned long)max_accel,
          mech->gear_num,
          mech->gear_den,
          mech->micro_step,
-         (unsigned long)Stepper_GetMotorPulsesPerRev(motor_id),
-         (long)Stepper_GetPulsesPerOutputRev(motor_id));
+         (unsigned long)limit->max_motor_rpm,
+         (unsigned long)limit->min_accel_rpm_s,
+         (unsigned long)limit->max_accel_rpm_s);
+}
+
+static void Stepper_PrintSetting(uint8_t motor_id)
+{
+  Stepper_PrintRpmSettingValue(motor_id, (int32_t)stepper_cfg[motor_id].param.rpm);
+}
+
+static void Stepper_PrintRpmSettingValue(uint8_t motor_id, int32_t rpm)
+{
+  const StepperSafetyLimit *limit;
+  uint32_t max_rpm;
+
+  if (!STEPPER_ID_VALID(motor_id))
+  {
+    return;
+  }
+
+  limit = &stepper_cfg[motor_id].limit;
+  max_rpm = Stepper_GetEffectiveMaxRpm(motor_id);
+
+  printf("\n%s setting rpm=%ld(%lu~%lu rpm)",
+         devices[motor_id].name,
+         (long)rpm,
+         (unsigned long)limit->min_rpm,
+         (unsigned long)max_rpm);
 }
 
 static void Stepper_PrintStartResult(uint8_t motor_id, StepperCmdResult result)
@@ -305,9 +430,7 @@ static void Stepper_PrintStartResult(uint8_t motor_id, StepperCmdResult result)
   {
     printf(" rev=");
     PrintFixed1Signed(stepper_cfg[motor_id].param.rev_0p1);
-    printf(" accel=%lurpm/s decel=%lurpm/s rpm=%lurpm",
-           (unsigned long)stepper_cfg[motor_id].param.accel_rpm_s,
-           (unsigned long)stepper_cfg[motor_id].param.decel_rpm_s,
+    printf(" rpm=%lu",
            (unsigned long)stepper_cfg[motor_id].param.rpm);
   }
 }
@@ -318,25 +441,36 @@ static void Stepper_PrintStopResult(uint8_t motor_id, StepperCmdResult result)
   PrintFixed1Signed(devices[motor_id].position);
 }
 
+static void Stepper_PrintCommandNewline(void)
+{
+  printf("\n");
+}
+
 static uint8_t Stepper_CheckUserRange(uint8_t motor_id, const StepperParam *param)
 {
   const StepperSafetyLimit *limit;
+  uint32_t max_rpm;
+  uint32_t min_accel;
+  uint32_t max_accel;
 
   limit = &stepper_cfg[motor_id].limit;
+  max_rpm = Stepper_GetEffectiveMaxRpm(motor_id);
+  min_accel = Stepper_GetEffectiveMinAccel(motor_id);
+  max_accel = Stepper_GetEffectiveMaxAccel(motor_id);
 
   if ((param->rev_0p1 < limit->min_rev_0p1) || (param->rev_0p1 > limit->max_rev_0p1))
   {
     return FALSE;
   }
-  if ((param->accel_rpm_s < limit->min_accel_rpm_s) || (param->accel_rpm_s > limit->max_accel_rpm_s))
+  if ((param->accel_rpm_s < min_accel) || (param->accel_rpm_s > max_accel))
   {
     return FALSE;
   }
-  if ((param->decel_rpm_s < limit->min_decel_rpm_s) || (param->decel_rpm_s > limit->max_decel_rpm_s))
+  if ((param->decel_rpm_s < min_accel) || (param->decel_rpm_s > max_accel))
   {
     return FALSE;
   }
-  if ((param->rpm < limit->min_rpm) || (param->rpm > limit->max_rpm))
+  if ((param->rpm < limit->min_rpm) || (param->rpm > max_rpm))
   {
     return FALSE;
   }
@@ -349,8 +483,6 @@ static uint8_t Stepper_CheckMotorEquivalentRange(uint8_t motor_id, const Stepper
   uint32_t motor_rpm;
   uint32_t accel_internal;
   uint32_t decel_internal;
-  uint32_t accel_delay;
-  uint32_t decel_delay;
 
   limit = &stepper_cfg[motor_id].limit;
   motor_rpm = Stepper_OutputRpmToMotorRpm(motor_id, param->rpm);
@@ -362,15 +494,8 @@ static uint8_t Stepper_CheckMotorEquivalentRange(uint8_t motor_id, const Stepper
 
   accel_internal = Stepper_RpmPerSecToAccel(motor_id, param->accel_rpm_s);
   decel_internal = Stepper_RpmPerSecToAccel(motor_id, param->decel_rpm_s);
-  accel_delay = Stepper_CalcInitialStepDelay(motor_id, accel_internal);
-  decel_delay = Stepper_CalcInitialStepDelay(motor_id, decel_internal);
-
-  if ((accel_delay == 0) || (decel_delay == 0))
-  {
-    return FALSE;
-  }
-
-  if (((accel_delay / 2) > TIM_PERIOD) || ((decel_delay / 2) > TIM_PERIOD))
+  if ((Stepper_CalcInitialStepDelay(motor_id, accel_internal) == 0) ||
+      (Stepper_CalcInitialStepDelay(motor_id, decel_internal) == 0))
   {
     return FALSE;
   }
@@ -475,6 +600,8 @@ DeviceApiResult DeviceApi_StepperRun(uint8_t motor_id, uint8_t dir)
     return DEVICE_API_PARAM_ERROR;
   }
 
+  Stepper_ApplyMechanicalConfig();
+
   param = stepper_cfg[motor_id].param;
   param.rev_0p1 = 1;
   if ((Stepper_CheckUserRange(motor_id, &param) != TRUE) ||
@@ -561,6 +688,10 @@ DeviceApiResult DeviceApi_StepperSetDecel(uint8_t motor_id, uint32_t decel)
 DeviceApiResult DeviceApi_StepperSetRpm(uint8_t motor_id, uint32_t rpm)
 {
   StepperParam param;
+  uint32_t accel_internal;
+  uint32_t decel_internal;
+  uint32_t speed_internal;
+  StepperCmdResult result;
 
   if (!STEPPER_ID_VALID(motor_id))
   {
@@ -574,7 +705,108 @@ DeviceApiResult DeviceApi_StepperSetRpm(uint8_t motor_id, uint32_t rpm)
   {
     return DEVICE_API_RANGE_ERROR;
   }
+
+  if (motor_status[motor_id].running == TRUE)
+  {
+    accel_internal = Stepper_RpmPerSecToAccel(motor_id, param.accel_rpm_s);
+    decel_internal = Stepper_RpmPerSecToAccel(motor_id, param.decel_rpm_s);
+    speed_internal = Stepper_RpmToSpeed(motor_id, param.rpm);
+    result = Stepper_UpdateRunningSpeed(motor_id, accel_internal, decel_internal, speed_internal);
+    if (result != STEPPER_CMD_OK)
+    {
+      return DeviceApi_FromStepperResult(result);
+    }
+  }
+
   stepper_cfg[motor_id].param = param;
+  return DEVICE_API_OK;
+}
+
+DeviceApiResult DeviceApi_StepperSetSignedRpm(uint8_t motor_id, int32_t rpm)
+{
+  StepperParam param;
+  uint32_t abs_rpm;
+  uint32_t accel_internal;
+  uint32_t decel_internal;
+  uint32_t speed_internal;
+  uint8_t dir;
+  uint8_t stop;
+  StepperCmdResult result;
+
+  if (!STEPPER_ID_VALID(motor_id))
+  {
+    return DEVICE_API_PARAM_ERROR;
+  }
+
+  if ((motor_status[motor_id].running != TRUE) ||
+      (srd[motor_id].continuous != TRUE))
+  {
+    if (rpm <= 0)
+    {
+      return DEVICE_API_RANGE_ERROR;
+    }
+    return DeviceApi_StepperSetRpm(motor_id, (uint32_t)rpm);
+  }
+
+  stop = (rpm == 0) ? TRUE : FALSE;
+  if (stop == TRUE)
+  {
+    abs_rpm = 0;
+    dir = srd[motor_id].dir;
+  }
+  else if (rpm < 0)
+  {
+    abs_rpm = (uint32_t)(-rpm);
+    dir = CCW;
+  }
+  else
+  {
+    abs_rpm = (uint32_t)rpm;
+    dir = CW;
+  }
+
+  Stepper_ApplyMechanicalConfig();
+
+  param = stepper_cfg[motor_id].param;
+  if (stop != TRUE)
+  {
+    param.rpm = abs_rpm;
+  }
+
+  if (stop == TRUE)
+  {
+    if ((param.accel_rpm_s < Stepper_GetEffectiveMinAccel(motor_id)) ||
+        (param.accel_rpm_s > Stepper_GetEffectiveMaxAccel(motor_id)) ||
+        (param.decel_rpm_s < Stepper_GetEffectiveMinAccel(motor_id)) ||
+        (param.decel_rpm_s > Stepper_GetEffectiveMaxAccel(motor_id)))
+    {
+      return DEVICE_API_RANGE_ERROR;
+    }
+  }
+  else if ((Stepper_CheckUserRange(motor_id, &param) != TRUE) ||
+           (Stepper_CheckMotorEquivalentRange(motor_id, &param) != TRUE))
+  {
+    return DEVICE_API_RANGE_ERROR;
+  }
+
+  accel_internal = Stepper_RpmPerSecToAccel(motor_id, param.accel_rpm_s);
+  decel_internal = Stepper_RpmPerSecToAccel(motor_id, param.decel_rpm_s);
+  speed_internal = (stop == TRUE) ? 0U : Stepper_RpmToSpeed(motor_id, param.rpm);
+  result = Stepper_UpdateContinuousSpeedSigned(motor_id,
+                                               dir,
+                                               stop,
+                                               accel_internal,
+                                               decel_internal,
+                                               speed_internal);
+  if (result != STEPPER_CMD_OK)
+  {
+    return DeviceApi_FromStepperResult(result);
+  }
+
+  if (stop != TRUE)
+  {
+    stepper_cfg[motor_id].param = param;
+  }
   return DEVICE_API_OK;
 }
 
@@ -592,9 +824,42 @@ void DeviceApi_BindStepperRosCmd(uint8_t motor_id, uint32_t id, const char *cmd)
 
 static void Stepper_CommandStatus(uint8_t motor_id)
 {
-  Device_PrintStatus(motor_id);
-  Stepper_PrintParam(motor_id);
-  Stepper_PrintLimit(motor_id);
+  const StepperMechanicalConfig *mech;
+  const StepperSafetyLimit *limit;
+  uint32_t max_rpm;
+  uint32_t min_accel;
+  uint32_t max_accel;
+
+  Device_Task();
+
+  mech = &stepper_cfg[motor_id].mech;
+  limit = &stepper_cfg[motor_id].limit;
+  max_rpm = Stepper_GetEffectiveMaxRpm(motor_id);
+  min_accel = Stepper_GetEffectiveMinAccel(motor_id);
+  max_accel = Stepper_GetEffectiveMaxAccel(motor_id);
+
+  printf("\n%s enabled=%d err=%lu rev=",
+         devices[motor_id].name,
+         devices[motor_id].enabled,
+         (unsigned long)devices[motor_id].error_code);
+  PrintFixed1Signed(devices[motor_id].position);
+  printf("(");
+  PrintFixed1Signed(limit->min_rev_0p1);
+  printf("~");
+  PrintFixed1Signed(limit->max_rev_0p1);
+  printf(") accel=%lu(%lu~%lu) decel=%lu(%lu~%lu) rpm=%lu(%lu~%lu) gear=%u:%u micro=%u",
+         (unsigned long)stepper_cfg[motor_id].param.accel_rpm_s,
+         (unsigned long)min_accel,
+         (unsigned long)max_accel,
+         (unsigned long)stepper_cfg[motor_id].param.decel_rpm_s,
+         (unsigned long)min_accel,
+         (unsigned long)max_accel,
+         (unsigned long)stepper_cfg[motor_id].param.rpm,
+         (unsigned long)limit->min_rpm,
+         (unsigned long)max_rpm,
+         mech->gear_num,
+         mech->gear_den,
+         mech->micro_step);
 }
 
 static void Stepper_CommandStop(uint8_t motor_id, int argc)
@@ -665,59 +930,110 @@ static void Stepper_CommandMove(uint8_t motor_id, int argc, char *argv[])
   }
 
   Stepper_PrintStartResult(motor_id, Stepper_ApiResultToCmdResult(api_result));
-  if ((api_result == DEVICE_API_OK) && (continuous == TRUE))
+  if (api_result == DEVICE_API_OK)
   {
-    printf(" continuous dir=%s", (dir == CCW) ? "ccw" : "cw");
+    if (continuous == TRUE)
+    {
+      printf(" continuous");
+    }
+    printf(" dir=%s", Stepper_DirName(dir));
   }
 }
 
-static void Stepper_CommandSetParam(uint8_t motor_id, int argc, char *argv[])
+static void Stepper_CommandRpm(uint8_t motor_id, int argc, char *argv[])
 {
-  uint32_t temp;
+  int32_t temp;
+  DeviceApiResult api_result;
 
   if (argc != 3)
   {
-    printf("\n%s %s param_error", devices[motor_id].name, argv[1]);
+    printf("\n%s rpm param_error", devices[motor_id].name);
     return;
   }
 
   temp = atoi(argv[2]);
-  if (strcmp(argv[1], "accel") == 0)
+  api_result = DeviceApi_StepperSetSignedRpm(motor_id, temp);
+  if (api_result == DEVICE_API_RANGE_ERROR)
   {
-    stepper_cfg[motor_id].param.accel_rpm_s = temp;
-    if ((Stepper_CheckUserRange(motor_id, &stepper_cfg[motor_id].param) != TRUE) ||
-        (Stepper_CheckMotorEquivalentRange(motor_id, &stepper_cfg[motor_id].param) != TRUE))
-    {
-      printf("\n%s accel range_error", devices[motor_id].name);
-      Stepper_PrintLimit(motor_id);
-      return;
-    }
+    printf("\n%s rpm range_error", devices[motor_id].name);
+    Stepper_PrintSetting(motor_id);
+    return;
   }
-  else if (strcmp(argv[1], "decel") == 0)
+  if (api_result == DEVICE_API_BUSY)
   {
-    stepper_cfg[motor_id].param.decel_rpm_s = temp;
-    if ((Stepper_CheckUserRange(motor_id, &stepper_cfg[motor_id].param) != TRUE) ||
-        (Stepper_CheckMotorEquivalentRange(motor_id, &stepper_cfg[motor_id].param) != TRUE))
-    {
-      printf("\n%s decel range_error", devices[motor_id].name);
-      Stepper_PrintLimit(motor_id);
-      return;
-    }
+    printf("\n%s rpm busy", devices[motor_id].name);
+    Stepper_PrintSetting(motor_id);
+    return;
+  }
+  if (api_result != DEVICE_API_OK)
+  {
+    printf("\n%s rpm param_error", devices[motor_id].name);
+    Stepper_PrintSetting(motor_id);
+    return;
+  }
+
+  if (temp == 0)
+  {
+    Stepper_PrintSetting(motor_id);
+    printf(" dir=STOP");
   }
   else
   {
-    stepper_cfg[motor_id].param.rpm = temp;
-    if ((Stepper_CheckUserRange(motor_id, &stepper_cfg[motor_id].param) != TRUE) ||
-        (Stepper_CheckMotorEquivalentRange(motor_id, &stepper_cfg[motor_id].param) != TRUE))
-    {
-      printf("\n%s rpm range_error", devices[motor_id].name);
-      Stepper_PrintLimit(motor_id);
-      return;
-    }
+    Stepper_PrintRpmSettingValue(motor_id, (temp < 0) ? -temp : temp);
+    printf(" dir=%s", Stepper_DirName((temp < 0) ? CCW : CW));
+  }
+}
+
+static void Stepper_CommandSet(uint8_t motor_id, int argc, char *argv[])
+{
+  StepperDeviceConfig old_cfg;
+  uint32_t accel;
+  uint32_t decel;
+  uint32_t micro;
+  uint16_t gear_num;
+  uint16_t gear_den;
+
+  if (argc != 6)
+  {
+    printf("\n%s set param_error", devices[motor_id].name);
+    return;
   }
 
-  Stepper_PrintParam(motor_id);
-  Stepper_PrintLimit(motor_id);
+  if (motor_status[motor_id].running == TRUE)
+  {
+    printf("\n%s set busy", devices[motor_id].name);
+    return;
+  }
+
+  accel = (uint32_t)atoi(argv[2]);
+  decel = (uint32_t)atoi(argv[3]);
+  micro = (uint32_t)atoi(argv[5]);
+  if ((Stepper_ParseGear(argv[4], &gear_num, &gear_den) != TRUE) ||
+      (micro < MTOR_MIN_MICRO_STEP) || (micro > MTOR_MAX_MICRO_STEP))
+  {
+    printf("\n%s set param_error", devices[motor_id].name);
+    Stepper_PrintSetting(motor_id);
+    return;
+  }
+
+  old_cfg = stepper_cfg[motor_id];
+  stepper_cfg[motor_id].param.accel_rpm_s = accel;
+  stepper_cfg[motor_id].param.decel_rpm_s = decel;
+  stepper_cfg[motor_id].mech.gear_num = gear_num;
+  stepper_cfg[motor_id].mech.gear_den = gear_den;
+  stepper_cfg[motor_id].mech.micro_step = (uint16_t)micro;
+
+  if ((Stepper_CheckUserRange(motor_id, &stepper_cfg[motor_id].param) != TRUE) ||
+      (Stepper_CheckMotorEquivalentRange(motor_id, &stepper_cfg[motor_id].param) != TRUE))
+  {
+    stepper_cfg[motor_id] = old_cfg;
+    printf("\n%s set range_error", devices[motor_id].name);
+    Stepper_PrintSetting(motor_id);
+    return;
+  }
+
+  Stepper_UpdateMotorPulses(motor_id);
+  Stepper_PrintSetting(motor_id);
 }
 
 void Stepper_Command(uint8_t device_id, int argc, char *argv[])
@@ -727,30 +1043,40 @@ void Stepper_Command(uint8_t device_id, int argc, char *argv[])
   if (argc < 2)
   {
     printf("\n%s missing action", devices[device_id].name);
+    Stepper_PrintCommandNewline();
     return;
   }
   if (strcmp(argv[1], "status") == 0)
   {
     Stepper_CommandStatus(device_id);
+    Stepper_PrintCommandNewline();
     return;
   }
   if (strcmp(argv[1], "stop") == 0)
   {
     Stepper_CommandStop(device_id, argc);
+    Stepper_PrintCommandNewline();
     return;
   }
   if (strcmp(argv[1], "move") == 0)
   {
     Stepper_CommandMove(device_id, argc, argv);
+    Stepper_PrintCommandNewline();
     return;
   }
-  if ((strcmp(argv[1], "accel") == 0) ||
-      (strcmp(argv[1], "decel") == 0) ||
-      (strcmp(argv[1], "rpm") == 0))
+  if (strcmp(argv[1], "rpm") == 0)
   {
-    Stepper_CommandSetParam(device_id, argc, argv);
+    Stepper_CommandRpm(device_id, argc, argv);
+    Stepper_PrintCommandNewline();
+    return;
+  }
+  if (strcmp(argv[1], "set") == 0)
+  {
+    Stepper_CommandSet(device_id, argc, argv);
+    Stepper_PrintCommandNewline();
     return;
   }
 
   printf("\n%s unknown action: %s", devices[device_id].name, argv[1]);
+  Stepper_PrintCommandNewline();
 }

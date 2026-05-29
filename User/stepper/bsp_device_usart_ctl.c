@@ -174,9 +174,8 @@ static void ShowCommandHelp(void)
   printf("\n命令说明:");
   printf("\n  mtor1/2 move [rev: -10000~10000(0.1圈), +0/-0 continuous]");
   printf("\n  mtor1/2 stop");
-  printf("\n  mtor1/2 accel [value: 60~500(rpm/s)]");
-  printf("\n  mtor1/2 decel [value: 60~500(rpm/s)]");
-  printf("\n  mtor1/2 rpm [value: mtor1 1~600, mtor2 1~30]");
+  printf("\n  mtor1/2 rpm [value]");
+  printf("\n  mtor1/2 set [accel] [decel] [gear] [micro]");
   printf("\n  mtor1/2 status");
   printf("\n  clamp ping [id: 0~253]");
   printf("\n  clamp status [id: 0~253]");
@@ -193,7 +192,7 @@ static void ShowCommandHelp(void)
   printf("\n  vacum stop");
   printf("\n  vacum status");
   printf("\n  status");
-  printf("\n示例: mtor1 move 50 -> 5.0圈; mtor1 move +0 -> continuous CW until stop");
+  printf("\n示例: mtor1 move 50 -> 5.0圈 CW; mtor1 move -50 -> 5.0圈 CCW; mtor1 move +0 -> continuous CW until stop; continuous中rpm N=CW, rpm -N=CCW, rpm 0减速停机");
   printf("\n");
 }
 
@@ -209,9 +208,8 @@ void ShowHelp(void)
   printf("\n  vacum : 钧舵EVS08真空吸盘 TX PC10, RX PC11(UART4, RS485), DE/RE PH9, id=9");
   printf("\n参数说明:");
   printf("\n  mtor rev   = -10000~10000(0.1圈)，默认 50 = 5.0圈，+0/-0 持续旋转直到 stop");
-  printf("\n       accel = 60~500(rpm/s)，默认 100");
-  printf("\n       decel = 60~500(rpm/s)，默认 100");
-  printf("\n       rpm   = mtor1 1~600 default 100; mtor2 1~30 default 30");
+  printf("\n       rpm   = output rpm");
+  printf("\n       set   = accel/decel(rpm/s), gear xx:1, micro");
   printf("\n       stop  = 立即停止当前运动并保持当前位置");
   printf("\n  clamp position = 700~2048");
   printf("\n        move     = openPos/Pct, e.g. 700 or 100%%");

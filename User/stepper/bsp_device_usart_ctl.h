@@ -70,6 +70,7 @@ DeviceApiResult DeviceApi_StepperStop(uint8_t motor_id, int32_t *rev_0p1);
 DeviceApiResult DeviceApi_StepperSetAccel(uint8_t motor_id, uint32_t accel);
 DeviceApiResult DeviceApi_StepperSetDecel(uint8_t motor_id, uint32_t decel);
 DeviceApiResult DeviceApi_StepperSetRpm(uint8_t motor_id, uint32_t rpm);
+DeviceApiResult DeviceApi_StepperSetSignedRpm(uint8_t motor_id, int32_t rpm);
 void DeviceApi_BindStepperRosCmd(uint8_t motor_id, uint32_t id, const char *cmd);
 
 DeviceApiResult DeviceApi_ClampStatus(uint8_t servo_id, DeviceClampStatus *out);

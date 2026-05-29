@@ -257,7 +257,10 @@ static void Ros_PrintStepperState(uint32_t id, const char *dev)
 static void Ros_HandleStepper(uint32_t id, const char *dev, int argc, char *argv[])
 {
   uint8_t motor_id;
+  uint8_t dir;
+  uint8_t continuous;
   int32_t rev;
+  int32_t signed_rpm;
   uint32_t rpm;
   DeviceApiResult ret;
   RosCmdContext ctx;
@@ -295,19 +298,26 @@ static void Ros_HandleStepper(uint32_t id, const char *dev, int argc, char *argv
       return;
     }
 
+    dir = CW;
+    continuous = FALSE;
     if (strcmp(argv[1], "+0") == 0)
     {
       ret = DeviceApi_StepperRun(motor_id, CW);
       rev = 0;
+      dir = CW;
+      continuous = TRUE;
     }
     else if (strcmp(argv[1], "-0") == 0)
     {
       ret = DeviceApi_StepperRun(motor_id, CCW);
       rev = 0;
+      dir = CCW;
+      continuous = TRUE;
     }
     else if ((Ros_ParseI32(argv[1], &rev) == TRUE) && (rev != 0))
     {
       ret = DeviceApi_StepperMove(motor_id, rev);
+      dir = (rev < 0) ? CCW : CW;
     }
     else
     {
@@ -320,10 +330,11 @@ static void Ros_HandleStepper(uint32_t id, const char *dev, int argc, char *argv
       DeviceApi_BindStepperRosCmd(motor_id, id, "move");
       Ros_PrintAck(&ctx, "ok");
       printf(" rev=%ld", (long)rev);
-      if ((strcmp(argv[1], "+0") == 0) || (strcmp(argv[1], "-0") == 0))
+      if (continuous == TRUE)
       {
-        printf(" continuous=1 dir=%s", (strcmp(argv[1], "-0") == 0) ? "ccw" : "cw");
+        printf(" continuous=1");
       }
+      printf(" dir=%s", (dir == CCW) ? "CCW" : "CW");
     }
     else
     {
@@ -357,7 +368,7 @@ static void Ros_HandleStepper(uint32_t id, const char *dev, int argc, char *argv
       (strcmp(argv[0], "decel") == 0) ||
       (strcmp(argv[0], "rpm") == 0))
   {
-    if ((argc != 2) || (Ros_ParseU32(argv[1], &rpm) != TRUE))
+    if (argc != 2)
     {
       Ros_PrintErr(&ctx, "param_error", 0);
       return;
@@ -365,21 +376,51 @@ static void Ros_HandleStepper(uint32_t id, const char *dev, int argc, char *argv
 
     if (strcmp(argv[0], "accel") == 0)
     {
+      if (Ros_ParseU32(argv[1], &rpm) != TRUE)
+      {
+        Ros_PrintErr(&ctx, "param_error", 0);
+        return;
+      }
       ret = DeviceApi_StepperSetAccel(motor_id, rpm);
     }
     else if (strcmp(argv[0], "decel") == 0)
     {
+      if (Ros_ParseU32(argv[1], &rpm) != TRUE)
+      {
+        Ros_PrintErr(&ctx, "param_error", 0);
+        return;
+      }
       ret = DeviceApi_StepperSetDecel(motor_id, rpm);
     }
     else
     {
-      ret = DeviceApi_StepperSetRpm(motor_id, rpm);
+      if (Ros_ParseI32(argv[1], &signed_rpm) != TRUE)
+      {
+        Ros_PrintErr(&ctx, "param_error", 0);
+        return;
+      }
+      ret = DeviceApi_StepperSetSignedRpm(motor_id, signed_rpm);
     }
 
     if (ret == DEVICE_API_OK)
     {
       Ros_PrintAck(&ctx, "ok");
-      printf(" value=%lu", (unsigned long)rpm);
+      if (strcmp(argv[0], "rpm") == 0)
+      {
+        printf(" value=%ld", (long)signed_rpm);
+        if (signed_rpm == 0)
+        {
+          printf(" dir=STOP");
+        }
+        else
+        {
+          printf(" dir=%s", (signed_rpm < 0) ? "CCW" : "CW");
+        }
+      }
+      else
+      {
+        printf(" value=%lu", (unsigned long)rpm);
+      }
     }
     else
     {
