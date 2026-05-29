@@ -43,8 +43,8 @@
 					LED3(a);\
 					LED4(a)
 					
-#define LED_ON		0
-#define LED_OFF		!0
+#define LED_ON		GPIO_PIN_RESET
+#define LED_OFF		GPIO_PIN_SET
 
 
 /* 直接操作寄存器的方法控制IO */
