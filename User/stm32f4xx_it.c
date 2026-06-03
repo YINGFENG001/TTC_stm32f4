@@ -40,6 +40,8 @@
 #include "stm32f4xx_it.h"
 #include "./usart/bsp_debug_usart.h"
 #include "./stepper/bsp_stepper_T_speed.h"
+#include "./stepper/bsp_stepper_init.h"
+#include <stdio.h>
 
 
 /** @addtogroup STM32F4xx_HAL_Examples
@@ -54,8 +56,139 @@
 /* Private define ------------------------------------------------------------*/
 /* Private macro -------------------------------------------------------------*/
 /* Private variables ---------------------------------------------------------*/
+#define SAFETY_FAULT_MAGIC              0x53414645UL
+#define SAFETY_FAULT_NONE               0U
+#define SAFETY_FAULT_HARD               1U
+#define SAFETY_FAULT_MEM                2U
+#define SAFETY_FAULT_BUS                3U
+#define SAFETY_FAULT_USAGE              4U
+#define SAFETY_IWDG_RELOAD_15S          1874U
+
+typedef struct {
+  uint32_t magic;
+  uint32_t fault_type;
+  uint32_t cfsr;
+  uint32_t hfsr;
+  uint32_t mmfar;
+  uint32_t bfar;
+} SafetyFaultRecord;
+
+#define SAFETY_FAULT_RECORD             ((volatile SafetyFaultRecord *)BKPSRAM_BASE)
+
+static IWDG_HandleTypeDef safety_iwdg_handle;
+static uint8_t safety_iwdg_started;
+
 /* Private function prototypes -----------------------------------------------*/
+static void Safety_EnableBackupSramAccess(void);
+static void Safety_SaveFault(uint32_t fault_type);
+static void Safety_FaultShutdownStepper(void);
+static void Safety_HandleFault(uint32_t fault_type);
+static const char *Safety_FaultName(uint32_t fault_type);
 /* Private functions ---------------------------------------------------------*/
+
+static void Safety_EnableBackupSramAccess(void)
+{
+  RCC->APB1ENR |= RCC_APB1ENR_PWREN;
+  RCC->AHB1ENR |= RCC_AHB1ENR_BKPSRAMEN;
+  PWR->CR |= PWR_CR_DBP;
+  PWR->CSR |= PWR_CSR_BRE;
+}
+
+void Safety_WatchdogInit(void)
+{
+  safety_iwdg_handle.Instance = IWDG;
+  safety_iwdg_handle.Init.Prescaler = IWDG_PRESCALER_256;
+  safety_iwdg_handle.Init.Reload = SAFETY_IWDG_RELOAD_15S;
+
+  if (HAL_IWDG_Init(&safety_iwdg_handle) == HAL_OK)
+  {
+    safety_iwdg_started = 1U;
+  }
+}
+
+void Safety_WatchdogRefresh(void)
+{
+  if (safety_iwdg_started != 0U)
+  {
+    (void)HAL_IWDG_Refresh(&safety_iwdg_handle);
+  }
+}
+
+static const char *Safety_FaultName(uint32_t fault_type)
+{
+  switch (fault_type)
+  {
+    case SAFETY_FAULT_HARD:  return "hard";
+    case SAFETY_FAULT_MEM:   return "mem";
+    case SAFETY_FAULT_BUS:   return "bus";
+    case SAFETY_FAULT_USAGE: return "usage";
+    default:                 return "unknown";
+  }
+}
+
+void Safety_ReportLastFault(void)
+{
+  uint8_t iwdg_reset;
+
+  Safety_EnableBackupSramAccess();
+  iwdg_reset = (__HAL_RCC_GET_FLAG(RCC_FLAG_IWDGRST) != RESET) ? 1U : 0U;
+
+  if (SAFETY_FAULT_RECORD->magic == SAFETY_FAULT_MAGIC)
+  {
+    printf("\n@fault dev=system event=last_fault type=%s cfsr=0x%08lX hfsr=0x%08lX mmfar=0x%08lX bfar=0x%08lX reset=%s",
+           Safety_FaultName(SAFETY_FAULT_RECORD->fault_type),
+           (unsigned long)SAFETY_FAULT_RECORD->cfsr,
+           (unsigned long)SAFETY_FAULT_RECORD->hfsr,
+           (unsigned long)SAFETY_FAULT_RECORD->mmfar,
+           (unsigned long)SAFETY_FAULT_RECORD->bfar,
+           iwdg_reset ? "iwdg" : "other");
+    SAFETY_FAULT_RECORD->magic = 0U;
+  }
+  else if (iwdg_reset != 0U)
+  {
+    printf("\n@fault dev=system event=last_reset reset=iwdg");
+  }
+
+  __HAL_RCC_CLEAR_RESET_FLAGS();
+}
+
+static void Safety_SaveFault(uint32_t fault_type)
+{
+  Safety_EnableBackupSramAccess();
+  SAFETY_FAULT_RECORD->fault_type = fault_type;
+  SAFETY_FAULT_RECORD->cfsr = SCB->CFSR;
+  SAFETY_FAULT_RECORD->hfsr = SCB->HFSR;
+  SAFETY_FAULT_RECORD->mmfar = SCB->MMFAR;
+  SAFETY_FAULT_RECORD->bfar = SCB->BFAR;
+  SAFETY_FAULT_RECORD->magic = SAFETY_FAULT_MAGIC;
+}
+
+static void Safety_FaultShutdownStepper(void)
+{
+  uint8_t i;
+
+  for (i = 0; i < STEPPER_NUM; i++)
+  {
+    TIM_CCxChannelCmd(MOTOR_PUL_TIM, stepper_hw[i].pul_channel, TIM_CCx_DISABLE);
+    __HAL_TIM_DISABLE_IT(&TIM_TimeBaseStructure, stepper_hw[i].pul_it);
+    MOTOR_EN(i, OFF);
+  }
+  __HAL_TIM_DISABLE(&TIM_TimeBaseStructure);
+}
+
+static void Safety_HandleFault(uint32_t fault_type)
+{
+  __disable_irq();
+  Safety_FaultShutdownStepper();
+  Safety_SaveFault(fault_type);
+  if (safety_iwdg_started == 0U)
+  {
+    NVIC_SystemReset();
+  }
+  while (1)
+  {
+  }
+}
 
 /******************************************************************************/
 /*            Cortex-M7 Processor Exceptions Handlers                         */
@@ -77,10 +210,7 @@ void NMI_Handler(void)
   */
 void HardFault_Handler(void)
 {
-  /* Go to infinite loop when Hard Fault exception occurs */
-  while (1)
-  {
-  }
+  Safety_HandleFault(SAFETY_FAULT_HARD);
 }
 
 /**
@@ -90,10 +220,7 @@ void HardFault_Handler(void)
   */
 void MemManage_Handler(void)
 {
-  /* Go to infinite loop when Memory Manage exception occurs */
-  while (1)
-  {
-  }
+  Safety_HandleFault(SAFETY_FAULT_MEM);
 }
 
 /**
@@ -103,10 +230,7 @@ void MemManage_Handler(void)
   */
 void BusFault_Handler(void)
 {
-  /* Go to infinite loop when Bus Fault exception occurs */
-  while (1)
-  {
-  }
+  Safety_HandleFault(SAFETY_FAULT_BUS);
 }
 
 /**
@@ -116,10 +240,7 @@ void BusFault_Handler(void)
   */
 void UsageFault_Handler(void)
 {
-  /* Go to infinite loop when Usage Fault exception occurs */
-  while (1)
-  {
-  }
+  Safety_HandleFault(SAFETY_FAULT_USAGE);
 }
 
 /**
@@ -174,8 +295,7 @@ void Usart_SendByte(char ch)
 {
 	WRITE_REG(UartHandle.Instance->DR,ch); 
 }
-//接收数组指针
-extern unsigned char UART_RxPtr;
+
 void DEBUG_USART_IRQHandler(void)
 {	
     unsigned char data;
@@ -183,48 +303,7 @@ void DEBUG_USART_IRQHandler(void)
 	if(__HAL_UART_GET_FLAG( &UartHandle, UART_FLAG_RXNE ) != RESET)
 	{	
 			data = ( uint16_t)READ_REG(UartHandle.Instance->DR);
-			if(1)
-			{
-					//如果为退格键
-					if(data == '\b')
-					{
-						//如果指针不在数组的开始位置
-						if(UART_RxPtr)
-						{						
-							Usart_SendByte('\b');
-							Usart_SendByte(' ');
-							Usart_SendByte('\b');
-							UART_RxPtr--;
-							UART_RxBuffer[UART_RxPtr]=0x00;
-						}
-					}
-					//如果不是退格键
-					else if ((data == '\r') || (data == '\n'))
-					{
-						if ((UART_RxPtr > 0) && (status.cmd != TRUE))
-						{
-							status.cmd = TRUE;
-						}
-					}
-					else
-					{
-						//将数据填入数组UART_RxBuffer
-						//并且将后面的一个元素清零如果数组满了则写入最后一个元素为止
-						if(UART_RxPtr < (UART_RX_BUFFER_SIZE - 1))
-						{
-							UART_RxBuffer[UART_RxPtr] = data;
-							UART_RxBuffer[UART_RxPtr + 1]=0x00;
-							UART_RxPtr++;
-						}
-						else
-						{
-							UART_RxBuffer[UART_RxPtr - 1] = data;
-							Usart_SendByte('\b');
-						}
-						//如果为回车键，则开始处理串口数据
-						Usart_SendByte(data);
-					}
-			}
+			DebugUsart_RxByteFromIsr(data);
     
     }	 
 

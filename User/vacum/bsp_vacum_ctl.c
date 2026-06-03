@@ -10,12 +10,14 @@
 typedef struct {
   uint8_t active;
   uint8_t drop_hits;
+  uint8_t comm_fail_count;
   Evs08Status last_status;
 } VacumHoldContext;
 
 #define VACUM_DROP_PERCENT_LIMIT       5U
+#define VACUM_COMM_FAIL_LIMIT          2U
 
-static VacumHoldContext vacum_hold = {FALSE, 0, {0}};
+static VacumHoldContext vacum_hold = {FALSE, 0, 0, {0}};
 
 static void Vacum_HoldBegin(void);
 static void Vacum_HoldEnd(void);
@@ -30,6 +32,7 @@ static void Vacum_HoldBegin(void)
 {
   vacum_hold.active = TRUE;
   vacum_hold.drop_hits = 0;
+  vacum_hold.comm_fail_count = 0;
   devices[DEVICE_VACUM].state = DEV_RUNNING;
 }
 
@@ -37,6 +40,7 @@ static void Vacum_HoldEnd(void)
 {
   vacum_hold.active = FALSE;
   vacum_hold.drop_hits = 0;
+  vacum_hold.comm_fail_count = 0;
 }
 
 void Vacum_MonitorTask(uint32_t now)
@@ -59,22 +63,33 @@ void Vacum_MonitorTask(uint32_t now)
   result = Evs08_ReadStatus(&status_data);
   if (result != MODBUS_OK)
   {
+    vacum_hold.comm_fail_count++;
+    if (vacum_hold.comm_fail_count < VACUM_COMM_FAIL_LIMIT)
+    {
+      printf("\n@warn dev=vacum event=status_error result=%s fail_count=%u action=retry",
+             Evs08_ResultName(result),
+             vacum_hold.comm_fail_count);
+      return;
+    }
+
     devices[DEVICE_VACUM].state = DEV_ERROR;
     devices[DEVICE_VACUM].error_code = result;
     Vacum_HoldEnd();
     (void)Evs08_Stop();
-    printf("\n@fault dev=vacum event=status_error result=%s action=stop",
-           Evs08_ResultName(result));
+    printf("\n@fault dev=vacum event=status_error result=%s fail_count=%u action=stop",
+           Evs08_ResultName(result),
+           VACUM_COMM_FAIL_LIMIT);
     return;
   }
 
+  vacum_hold.comm_fail_count = 0;
   vacum_hold.last_status = status_data;
   devices[DEVICE_VACUM].enabled = (status_data.ch1_enabled || status_data.ch2_enabled) ? TRUE : FALSE;
   devices[DEVICE_VACUM].value = status_data.ch1_status_reg;
   devices[DEVICE_VACUM].error_code = 0;
   devices[DEVICE_VACUM].state = DEV_RUNNING;
 
-  if ((status_data.ch1_vac_percent <= VACUM_DROP_PERCENT_LIMIT) ||
+  if ((status_data.ch1_vac_percent <= VACUM_DROP_PERCENT_LIMIT) &&
       (status_data.ch2_vac_percent <= VACUM_DROP_PERCENT_LIMIT))
   {
     vacum_hold.drop_hits++;

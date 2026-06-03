@@ -4,7 +4,7 @@
   * @author  fire
   * @version V1.0
   * @date    2018-xx-xx
-  * @brief   使用内核寄存器精确延时
+ * @brief   使用内核 DWT 计数器实现微秒级延时
   ******************************************************************
   * @attention
   *
@@ -47,12 +47,12 @@
 
 
 /**
-  * @brief  初始化时间戳
+  * @brief  初始化 DWT 时间戳计数器
   * @param  无
   * @retval 无
-  * @note   使用延时函数前，必须调用本函数
+  * @note   仅用于 delay_us/delay_ms，HAL_GetTick 使用 HAL 标准 SysTick 毫秒计数
   */
-HAL_StatusTypeDef HAL_InitTick(uint32_t TickPriority)
+void CPU_TS_TmrInit(void)
 {
     /* 使能DWT外设 */
     DEM_CR |= (uint32_t)DEM_CR_TRCENA;                
@@ -62,8 +62,6 @@ HAL_StatusTypeDef HAL_InitTick(uint32_t TickPriority)
 
     /* 使能Cortex-M DWT CYCCNT寄存器 */
     DWT_CR |= (uint32_t)DWT_CR_CYCCNTENA;
-  
-    return HAL_OK;
 }
 
 /**
@@ -75,17 +73,6 @@ uint32_t CPU_TS_TmrRd(void)
 {        
   return ((uint32_t)DWT_CYCCNT);
 }
-
-/**
-  * @brief  读取当前时间戳
-  * @param  无
-  * @retval 当前时间戳，即DWT_CYCCNT寄存器的值
-  */
-uint32_t HAL_GetTick(void)
-{        
-  return ((uint32_t)DWT_CYCCNT/SysClockFreq*1000);
-}
-
 
 /**
   * @brief  采用CPU的内部计数实现精确延时，32位计数器
@@ -103,7 +90,7 @@ void CPU_TS_Tmr_Delay_US(uint32_t us)
   /* 在函数内部初始化时间戳寄存器， */  
 #if (CPU_TS_INIT_IN_DELAY_FUNCTION)  
   /* 初始化时间戳并清零 */
-  HAL_InitTick(5);
+  CPU_TS_TmrInit();
 #endif
   
   ticks = us * (GET_CPU_ClkFreq() / 1000000);  /* 需要的节拍数 */      

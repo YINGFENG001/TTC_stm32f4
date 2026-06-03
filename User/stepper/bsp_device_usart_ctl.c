@@ -58,20 +58,26 @@ void Device_Task(void)
 {
   uint8_t i;
   uint32_t now;
+  StepperRuntimeSnapshot stepper_snapshot;
 
   now = HAL_GetTick();
   Stepper_ApplyMechanicalConfig();
 
   for (i = 0; i < STEPPER_NUM; i++)
   {
-    devices[i].position = Stepper_StepToRev0p1(i, stepPosition[i]);
-    devices[i].enabled = motor_status[i].out_ena;
+    if (Stepper_GetRuntimeSnapshot(i, &stepper_snapshot) != TRUE)
+    {
+      continue;
+    }
 
-    if (motor_status[i].out_ena != TRUE)
+    devices[i].position = Stepper_StepToRev0p1(i, stepper_snapshot.position_steps);
+    devices[i].enabled = stepper_snapshot.out_ena;
+
+    if (stepper_snapshot.out_ena != TRUE)
     {
       devices[i].state = DEV_DISABLED;
     }
-    else if (motor_status[i].running == TRUE)
+    else if (stepper_snapshot.running == TRUE)
     {
       devices[i].state = DEV_RUNNING;
     }
@@ -315,6 +321,7 @@ static void Command_Dispatch(char *line)
 void DealSerialData(void)
 {
   static char showflag = 1;
+  char cmd_line[UART_RX_BUFFER_SIZE];
 
   Stepper_ApplyMechanicalConfig();
 
@@ -324,14 +331,11 @@ void DealSerialData(void)
     return;
   }
 
-  if (status.cmd == TRUE)
+  if (DebugUsart_PopCommand(cmd_line, sizeof(cmd_line)) == TRUE)
   {
-    if (RosProtocol_TryDispatch((char *)UART_RxBuffer) != TRUE)
+    if (RosProtocol_TryDispatch(cmd_line) != TRUE)
     {
-      Command_Dispatch((char *)UART_RxBuffer);
+      Command_Dispatch(cmd_line);
     }
-    status.cmd = FALSE;
-
-    uart_FlushRxBuffer();
   }
 }

@@ -7,12 +7,12 @@
 
 /* 单台步进电机的梯形加减速运行参数 */
 typedef struct {
-  unsigned char run_state : 3; /* 当前运行状态：STOP/ACCEL/DECEL/RUN */
-  unsigned char dir : 1;       /* 当前方向：CW/CCW */
-  unsigned char continuous : 1;
-  unsigned char speed_update_pending : 1;
-  unsigned char target_dir : 1;
-  unsigned char stop_on_target : 1;
+  uint8_t run_state; /* 当前运行状态：STOP/ACCEL/DECEL/RUN */
+  uint8_t dir;       /* 当前方向：CW/CCW */
+  uint8_t continuous;
+  uint8_t speed_update_pending;
+  uint8_t target_dir;
+  uint8_t stop_on_target;
   unsigned int step_delay;     /* 下一次比较事件的延时周期 */
   unsigned int decel_start;    /* 开始进入减速段的步数位置 */
   signed int decel_val;        /* 减速段补偿值 */
@@ -28,10 +28,19 @@ typedef struct {
 
 /* 系统级状态标志 */
 struct GLOBAL_FLAGS {
-  unsigned char running:1; /* 当前是否存在任意电机正在运行 */
-  unsigned char cmd:1;     /* 串口是否接收到待处理命令 */
-  unsigned char out_ena:1; /* 驱动器输出是否使能 */
+  volatile uint8_t running; /* 当前是否存在任意电机正在运行 */
+  volatile uint8_t cmd;     /* 保留字段，串口命令已改为双缓冲 */
+  volatile uint8_t out_ena; /* 驱动器输出是否使能 */
 };
+
+typedef struct {
+  int32_t position_steps;
+  uint8_t running;
+  uint8_t out_ena;
+  uint8_t dir;
+  uint8_t continuous;
+  uint8_t run_state;
+} StepperRuntimeSnapshot;
 
 typedef enum {
   STEPPER_CMD_OK = 0,
@@ -61,10 +70,10 @@ typedef enum {
 /* 默认值仅用于上电初始化，实际运行参数由各设备单独下发 */
 #define STEPPER_DEFAULT_PULSES_PER_REV  6400U
 
-extern speedRampData srd[STEPPER_NUM];
-extern int stepPosition[STEPPER_NUM];
-extern struct GLOBAL_FLAGS status;
-extern struct GLOBAL_FLAGS motor_status[STEPPER_NUM];
+extern volatile speedRampData srd[STEPPER_NUM];
+extern volatile int stepPosition[STEPPER_NUM];
+extern volatile struct GLOBAL_FLAGS status;
+extern volatile struct GLOBAL_FLAGS motor_status[STEPPER_NUM];
 
 void speed_decision(uint8_t motor_id);
 void MSD_ENA(FunctionalState NewState);
@@ -75,5 +84,6 @@ StepperCmdResult Stepper_UpdateRunningSpeed(uint8_t motor_id, uint32_t accel, ui
 StepperCmdResult Stepper_UpdateContinuousSpeedSigned(uint8_t motor_id, uint8_t dir, uint8_t stop, uint32_t accel, uint32_t decel, uint32_t speed);
 StepperCmdResult Stepper_Stop(uint8_t motor_id);
 uint8_t Stepper_IsAnyRunning(void);
+uint8_t Stepper_GetRuntimeSnapshot(uint8_t motor_id, StepperRuntimeSnapshot *snapshot);
 
 #endif

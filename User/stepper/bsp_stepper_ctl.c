@@ -688,12 +688,18 @@ DeviceApiResult DeviceApi_StepperSetDecel(uint8_t motor_id, uint32_t decel)
 DeviceApiResult DeviceApi_StepperSetRpm(uint8_t motor_id, uint32_t rpm)
 {
   StepperParam param;
+  StepperRuntimeSnapshot snapshot;
   uint32_t accel_internal;
   uint32_t decel_internal;
   uint32_t speed_internal;
   StepperCmdResult result;
 
   if (!STEPPER_ID_VALID(motor_id))
+  {
+    return DEVICE_API_PARAM_ERROR;
+  }
+
+  if (Stepper_GetRuntimeSnapshot(motor_id, &snapshot) != TRUE)
   {
     return DEVICE_API_PARAM_ERROR;
   }
@@ -706,7 +712,7 @@ DeviceApiResult DeviceApi_StepperSetRpm(uint8_t motor_id, uint32_t rpm)
     return DEVICE_API_RANGE_ERROR;
   }
 
-  if (motor_status[motor_id].running == TRUE)
+  if (snapshot.running == TRUE)
   {
     accel_internal = Stepper_RpmPerSecToAccel(motor_id, param.accel_rpm_s);
     decel_internal = Stepper_RpmPerSecToAccel(motor_id, param.decel_rpm_s);
@@ -725,6 +731,7 @@ DeviceApiResult DeviceApi_StepperSetRpm(uint8_t motor_id, uint32_t rpm)
 DeviceApiResult DeviceApi_StepperSetSignedRpm(uint8_t motor_id, int32_t rpm)
 {
   StepperParam param;
+  StepperRuntimeSnapshot snapshot;
   uint32_t abs_rpm;
   uint32_t accel_internal;
   uint32_t decel_internal;
@@ -738,8 +745,13 @@ DeviceApiResult DeviceApi_StepperSetSignedRpm(uint8_t motor_id, int32_t rpm)
     return DEVICE_API_PARAM_ERROR;
   }
 
-  if ((motor_status[motor_id].running != TRUE) ||
-      (srd[motor_id].continuous != TRUE))
+  if (Stepper_GetRuntimeSnapshot(motor_id, &snapshot) != TRUE)
+  {
+    return DEVICE_API_PARAM_ERROR;
+  }
+
+  if ((snapshot.running != TRUE) ||
+      (snapshot.continuous != TRUE))
   {
     if (rpm <= 0)
     {
@@ -752,7 +764,7 @@ DeviceApiResult DeviceApi_StepperSetSignedRpm(uint8_t motor_id, int32_t rpm)
   if (stop == TRUE)
   {
     abs_rpm = 0;
-    dir = srd[motor_id].dir;
+    dir = snapshot.dir;
   }
   else if (rpm < 0)
   {
@@ -987,6 +999,7 @@ static void Stepper_CommandRpm(uint8_t motor_id, int argc, char *argv[])
 static void Stepper_CommandSet(uint8_t motor_id, int argc, char *argv[])
 {
   StepperDeviceConfig old_cfg;
+  StepperRuntimeSnapshot snapshot;
   uint32_t accel;
   uint32_t decel;
   uint32_t micro;
@@ -999,7 +1012,13 @@ static void Stepper_CommandSet(uint8_t motor_id, int argc, char *argv[])
     return;
   }
 
-  if (motor_status[motor_id].running == TRUE)
+  if (Stepper_GetRuntimeSnapshot(motor_id, &snapshot) != TRUE)
+  {
+    printf("\n%s set param_error", devices[motor_id].name);
+    return;
+  }
+
+  if (snapshot.running == TRUE)
   {
     printf("\n%s set busy", devices[motor_id].name);
     return;

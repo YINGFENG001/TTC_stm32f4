@@ -17,6 +17,7 @@ typedef struct {
   uint8_t active;
   uint16_t target_load;
   uint8_t low_load_hits;
+  uint8_t comm_fail_count;
   int16_t integral;
   uint16_t last_target_pos;
   uint16_t low_load_start_pos;
@@ -39,6 +40,7 @@ typedef struct {
 #define CLAMP_HOLD_GAIN_DEN            100
 #define CLAMP_HOLD_INTEGRAL_LIMIT      1000
 #define CLAMP_HOLD_DELTA_LIMIT         15
+#define CLAMP_HOLD_COMM_FAIL_LIMIT     2U
 
 static ClampParam clamp_param = {
   GRIPPER_SPEED_DEFAULT,
@@ -46,7 +48,7 @@ static ClampParam clamp_param = {
   GRIPPER_RELEASE_DELTA_DEFAULT
 };
 
-static ClampHoldContext clamp_hold = {FALSE, 0, 0, 0, 0, 0, 0, 0, 0, {0}};
+static ClampHoldContext clamp_hold = {FALSE, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0}};
 
 static int16_t Device_Abs16(int16_t value);
 static uint16_t Clamp_LimitPosition(int32_t position);
@@ -131,6 +133,7 @@ static void Clamp_HoldBegin(uint16_t target_load, const BusServoStatus *status_d
   clamp_hold.active = TRUE;
   clamp_hold.target_load = target_load;
   clamp_hold.low_load_hits = 0;
+  clamp_hold.comm_fail_count = 0;
   clamp_hold.integral = 0;
   clamp_hold.last_target_pos = 0;
   clamp_hold.low_load_start_pos = 0;
@@ -150,6 +153,7 @@ static void Clamp_HoldEnd(void)
   clamp_hold.active = FALSE;
   clamp_hold.target_load = 0;
   clamp_hold.low_load_hits = 0;
+  clamp_hold.comm_fail_count = 0;
   clamp_hold.integral = 0;
   clamp_hold.last_target_pos = 0;
   clamp_hold.low_load_start_pos = 0;
@@ -308,15 +312,28 @@ static uint8_t Clamp_HoldReadStatus(BusServoStatus *status_data)
   result = BusServo_ReadStatus(GRIPPER_SERVO_ID_DEFAULT, status_data, &servo_error);
   if (result == BUS_SERVO_OK)
   {
+    clamp_hold.comm_fail_count = 0;
     return TRUE;
+  }
+
+  clamp_hold.comm_fail_count++;
+  if (clamp_hold.comm_fail_count < CLAMP_HOLD_COMM_FAIL_LIMIT)
+  {
+    printf("\n@warn dev=clamp event=status_error result=%s servo_err=0x%02X fail_count=%u action=retry",
+           BusServo_ResultName(result),
+           servo_error,
+           clamp_hold.comm_fail_count);
+    return FALSE;
   }
 
   devices[DEVICE_CLAMP].state = DEV_ERROR;
   devices[DEVICE_CLAMP].error_code = result;
   Clamp_HoldEnd();
   (void)BusServo_SetTorqueEnable(GRIPPER_SERVO_ID_DEFAULT, 0);
-  printf("\n@fault dev=clamp event=status_error result=%s servo_err=0x%02X action=torque_off",
-         BusServo_ResultName(result), servo_error);
+  printf("\n@fault dev=clamp event=status_error result=%s servo_err=0x%02X fail_count=%u action=torque_off",
+         BusServo_ResultName(result),
+         servo_error,
+         CLAMP_HOLD_COMM_FAIL_LIMIT);
   return FALSE;
 }
 

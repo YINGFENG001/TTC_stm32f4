@@ -17,13 +17,87 @@
   
 #include "./usart/bsp_debug_usart.h"
 #include "./gripper/bsp_gripper_uart.h"
+#include <string.h>
 
 UART_HandleTypeDef UartHandle;
 
-//串口接收数组
-unsigned char UART_RxBuffer[UART_RX_BUFFER_SIZE];
-//串口接收数组指针
-unsigned char UART_RxPtr;
+static volatile uint8_t uart_active_buf[UART_RX_BUFFER_SIZE];
+static volatile uint8_t uart_pending_buf[UART_RX_BUFFER_SIZE];
+static volatile uint16_t uart_active_len;
+static volatile uint8_t uart_cmd_ready;
+static volatile uint8_t uart_overrun;
+
+static uint8_t DebugUsart_IsSpace(uint8_t ch)
+{
+  return ((ch == ' ') || (ch == '\t')) ? 1U : 0U;
+}
+
+static uint8_t DebugUsart_TokenEquals(const volatile uint8_t *buf,
+                                      uint16_t start,
+                                      uint16_t end,
+                                      const char *word)
+{
+  uint16_t i;
+
+  i = 0;
+  while ((start + i) < end)
+  {
+    if ((word[i] == '\0') || ((char)buf[start + i] != word[i]))
+    {
+      return 0U;
+    }
+    i++;
+  }
+
+  return (word[i] == '\0') ? 1U : 0U;
+}
+
+static uint8_t DebugUsart_IsPriorityStopCommand(const volatile uint8_t *buf,
+                                                uint16_t len)
+{
+  uint16_t token_start[3];
+  uint16_t token_end[3];
+  uint16_t pos;
+  uint8_t token_count;
+
+  pos = 0;
+  token_count = 0;
+  while ((pos < len) && (token_count < 3U))
+  {
+    while ((pos < len) && (DebugUsart_IsSpace(buf[pos]) != 0U))
+    {
+      pos++;
+    }
+    if (pos >= len)
+    {
+      break;
+    }
+
+    token_start[token_count] = pos;
+    while ((pos < len) && (DebugUsart_IsSpace(buf[pos]) == 0U))
+    {
+      pos++;
+    }
+    token_end[token_count] = pos;
+    token_count++;
+  }
+
+  if (token_count < 2U)
+  {
+    return 0U;
+  }
+
+  if (buf[token_start[0]] == '#')
+  {
+    if (token_count < 3U)
+    {
+      return 0U;
+    }
+    return DebugUsart_TokenEquals(buf, token_start[2], token_end[2], "stop");
+  }
+
+  return DebugUsart_TokenEquals(buf, token_start[1], token_end[1], "stop");
+}
 
  /**
   * @brief  DEBUG_USART GPIO 配置,工作模式配置。115200 8-N-1
@@ -119,8 +193,116 @@ void Usart_SendString(uint8_t *str)
 //清空发送缓冲
 void uart_FlushRxBuffer(void)
 {
-  UART_RxPtr = 0;
-  UART_RxBuffer[UART_RxPtr] = 0;
+  uint32_t primask;
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  uart_active_len = 0;
+  uart_active_buf[0] = 0;
+  uart_cmd_ready = 0;
+  uart_pending_buf[0] = 0;
+  uart_overrun = 0;
+  if (primask == 0U)
+  {
+    __enable_irq();
+  }
+}
+
+void DebugUsart_RxByteFromIsr(uint8_t data)
+{
+  if (data == '\b')
+  {
+    if (uart_active_len > 0U)
+    {
+      Usart_SendByte('\b');
+      Usart_SendByte(' ');
+      Usart_SendByte('\b');
+      uart_active_len--;
+      uart_active_buf[uart_active_len] = 0;
+    }
+    return;
+  }
+
+  if ((data == '\r') || (data == '\n'))
+  {
+    if (uart_active_len == 0U)
+    {
+      return;
+    }
+    if ((uart_cmd_ready == 0U) ||
+        (DebugUsart_IsPriorityStopCommand(uart_active_buf, uart_active_len) != 0U))
+    {
+      uart_overrun = (uart_cmd_ready == 0U) ? 0U : 1U;
+      memcpy((void *)uart_pending_buf, (const void *)uart_active_buf, uart_active_len);
+      uart_pending_buf[uart_active_len] = 0;
+      uart_cmd_ready = 1U;
+    }
+    else
+    {
+      uart_overrun = 1U;
+    }
+    uart_active_len = 0;
+    uart_active_buf[0] = 0;
+    return;
+  }
+
+  if (uart_active_len < (UART_RX_BUFFER_SIZE - 1U))
+  {
+    uart_active_buf[uart_active_len] = data;
+    uart_active_len++;
+    uart_active_buf[uart_active_len] = 0;
+  }
+  else
+  {
+    uart_active_buf[UART_RX_BUFFER_SIZE - 2U] = data;
+    Usart_SendByte('\b');
+  }
+  Usart_SendByte((char)data);
+}
+
+uint8_t DebugUsart_PopCommand(char *dest, uint16_t dest_size)
+{
+  uint32_t primask;
+  uint16_t i;
+
+  if ((dest == 0) || (dest_size == 0U))
+  {
+    return 0U;
+  }
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  if (uart_cmd_ready == 0U)
+  {
+    if (primask == 0U)
+    {
+      __enable_irq();
+    }
+    dest[0] = 0;
+    return 0U;
+  }
+
+  for (i = 0; (i < (dest_size - 1U)) && (i < UART_RX_BUFFER_SIZE); i++)
+  {
+    dest[i] = (char)uart_pending_buf[i];
+    if (dest[i] == 0)
+    {
+      break;
+    }
+  }
+  if (i >= (dest_size - 1U))
+  {
+    dest[dest_size - 1U] = 0;
+  }
+
+  uart_cmd_ready = 0U;
+  uart_pending_buf[0] = 0;
+  if (primask == 0U)
+  {
+    __enable_irq();
+  }
+
+  return 1U;
 }
 
 ///重定向c库函数printf到串口DEBUG_USART，重定向后可使用printf函数

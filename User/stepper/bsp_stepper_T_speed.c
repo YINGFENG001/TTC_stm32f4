@@ -7,10 +7,10 @@
 #include "./stepper/bsp_stepper_T_speed.h"
 #include "./usart/bsp_debug_usart.h"
 
-speedRampData srd[STEPPER_NUM];
-int stepPosition[STEPPER_NUM] = {0};
-struct GLOBAL_FLAGS status = {FALSE, FALSE, TRUE};
-struct GLOBAL_FLAGS motor_status[STEPPER_NUM] = {
+volatile speedRampData srd[STEPPER_NUM];
+volatile int stepPosition[STEPPER_NUM] = {0};
+volatile struct GLOBAL_FLAGS status = {FALSE, FALSE, TRUE};
+volatile struct GLOBAL_FLAGS motor_status[STEPPER_NUM] = {
   {FALSE, FALSE, TRUE},
   {FALSE, FALSE, TRUE}
 };
@@ -84,6 +84,31 @@ uint8_t Stepper_IsAnyRunning(void)
     }
   }
   return FALSE;
+}
+
+uint8_t Stepper_GetRuntimeSnapshot(uint8_t motor_id, StepperRuntimeSnapshot *snapshot)
+{
+  uint32_t primask;
+
+  if ((!STEPPER_ID_VALID(motor_id)) || (snapshot == 0))
+  {
+    return FALSE;
+  }
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  snapshot->position_steps = stepPosition[motor_id];
+  snapshot->running = motor_status[motor_id].running;
+  snapshot->out_ena = motor_status[motor_id].out_ena;
+  snapshot->dir = srd[motor_id].dir;
+  snapshot->continuous = srd[motor_id].continuous;
+  snapshot->run_state = srd[motor_id].run_state;
+  if (primask == 0U)
+  {
+    __enable_irq();
+  }
+
+  return TRUE;
 }
 
 static void Stepper_UpdateGlobalStatus(void)

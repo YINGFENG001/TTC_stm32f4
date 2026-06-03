@@ -9,7 +9,6 @@
 
 //串口接收缓冲数组大小
 #define UART_RX_BUFFER_SIZE 256 
-extern unsigned char UART_RxBuffer[UART_RX_BUFFER_SIZE];
 
 //引脚定义
 /*******************************************************/
@@ -34,8 +33,11 @@ extern unsigned char UART_RxBuffer[UART_RX_BUFFER_SIZE];
 /************************************************************/
 
 void Usart_SendString(uint8_t *str);
+void Usart_SendByte(char ch);
 void DEBUG_USART_Config(void);
+void DebugUsart_RxByteFromIsr(uint8_t data);
+uint8_t DebugUsart_PopCommand(char *dest, uint16_t dest_size);
 //int fputc(int ch, FILE *f);
 extern UART_HandleTypeDef UartHandle;
-extern void uart_FlushRxBuffer(void);
+void uart_FlushRxBuffer(void);
 #endif /* __USART1_H */

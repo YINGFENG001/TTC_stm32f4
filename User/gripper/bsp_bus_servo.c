@@ -195,7 +195,6 @@ static void BusServo_WriteUint16(uint8_t *data, uint16_t value)
 
 void BusServo_Init(void)
 {
-  HAL_InitTick(0);
   Gripper_UART_Config();
 }
 

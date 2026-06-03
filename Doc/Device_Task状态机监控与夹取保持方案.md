@@ -164,23 +164,26 @@ vacum grip
 
 判定条件：
 
-- `vac1 <= 5%` 或 `vac2 <= 5%`。
+- `vac1 <= 5%` 且 `vac2 <= 5%`，两路都低才认为吸盘整体掉落；单路真空度低但另一路仍能夹稳时不报 fault。
 - 连续命中 `5` 个快速检测周期。
 
 满足条件后，执行 `Evs08_Stop()` 并上报：
 
 ```text
-@fault dev=vacum event=drop vac1=4 vac2=63 obj1=0 obj2=1 action=stop
+@fault dev=vacum event=drop vac1=4 vac2=3 obj1=0 obj2=0 action=stop
 ```
 
 ## 自动上报
 
-当前自动上报分为两类：
+当前自动上报分为三类：
 
 ```text
+@warn  夹爪或吸盘后台状态读取第一次通信失败
 @info  夹爪 PI 调整或稳定保持
 @fault 掉落、状态读取异常等故障
 ```
+
+- 夹爪和吸盘后台状态读取第一次通信失败只打印 `@warn ... action=retry`，连续第二次失败才退出保持并打印 `@fault`。
 
 周期性 `@status` 自动打印已关闭。手动查看状态仍使用：
 

@@ -100,7 +100,6 @@ stm32f4xx_hal_i2c_ex.c
 stm32f4xx_hal_i2s.c
 stm32f4xx_hal_i2s_ex.c
 stm32f4xx_hal_irda.c
-stm32f4xx_hal_iwdg.c
 stm32f4xx_hal_lptim.c
 stm32f4xx_hal_qspi.c
 stm32f4xx_hal_rng.c
@@ -126,7 +125,6 @@ stm32f4xx_hal_wwdg.c
 /* #define HAL_HASH_MODULE_ENABLED */
 /* #define HAL_I2C_MODULE_ENABLED */
 /* #define HAL_I2S_MODULE_ENABLED */
-/* #define HAL_IWDG_MODULE_ENABLED */
 /* #define HAL_RNG_MODULE_ENABLED */
 /* #define HAL_RTC_MODULE_ENABLED */
 /* #define HAL_SAI_MODULE_ENABLED */
@@ -150,6 +148,7 @@ stm32f4xx_hal_flash.c
 stm32f4xx_hal_flash_ex.c
 stm32f4xx_hal_flash_ramfunc.c
 stm32f4xx_hal_gpio.c
+stm32f4xx_hal_iwdg.c
 stm32f4xx_hal_pwr.c
 stm32f4xx_hal_pwr_ex.c
 stm32f4xx_hal_rcc.c
@@ -163,6 +162,7 @@ stm32f4xx_hal_uart.c
 #define HAL_MODULE_ENABLED
 #define HAL_FLASH_MODULE_ENABLED
 #define HAL_GPIO_MODULE_ENABLED
+#define HAL_IWDG_MODULE_ENABLED
 #define HAL_PWR_MODULE_ENABLED
 #define HAL_RCC_MODULE_ENABLED
 #define HAL_TIM_MODULE_ENABLED

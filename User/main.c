@@ -26,6 +26,7 @@
 #include "./vacum/bsp_evs08.h"
 #include "./key/bsp_exti.h"
 #include "./led/bsp_led.h"
+#include "stm32f4xx_it.h"
 
 
 /**
@@ -35,10 +36,15 @@
   */
 int main(void) 
 {
+	/* 初始化 HAL 标准 SysTick 毫秒时间基 */
+	HAL_Init();
 	/* 初始化系统时钟为168MHz */
 	SystemClock_Config();
+	/* 初始化 DWT 计数器，仅用于 delay_us/delay_ms */
+	CPU_TS_TmrInit();
 	/*初始化USART 配置模式为 115200 8-N-1，中断接收*/
 	DEBUG_USART_Config();
+	Safety_ReportLastFault();
 	/*初始化夹爪检测串口 UART5: PC12(TX), PD2(RX), 1000000 8-N-1*/
 	BusServo_Init();
 	Evs08_Init();
@@ -50,6 +56,7 @@ int main(void)
 	stepper_Init();
 	//打印帮助命令
 	ShowHelp();
+	Safety_WatchdogInit();
 
 	while(1)
 	{     
@@ -59,6 +66,7 @@ int main(void)
 		Device_Task();
 		//非阻塞上报设备完成事件
 		Device_ReportDone();
+		Safety_WatchdogRefresh();
 	}
 } 	
 

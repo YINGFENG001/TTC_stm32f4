@@ -59,6 +59,9 @@ void DebugMon_Handler(void);
 void PendSV_Handler(void);
 void SysTick_Handler(void);
 void EXTI0_IRQHandler(void);
+void Safety_ReportLastFault(void);
+void Safety_WatchdogInit(void);
+void Safety_WatchdogRefresh(void);
 #ifdef __cplusplus
 }
 #endif
