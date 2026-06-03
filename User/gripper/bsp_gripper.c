@@ -1,6 +1,18 @@
 #include "./gripper/bsp_gripper.h"
 #include "./delay/core_delay.h"
 
+#define GRIPPER_CAL_TABLE_SIZE 14U
+
+static const uint16_t gripper_cal_pos_table[GRIPPER_CAL_TABLE_SIZE] = {
+  700, 800, 900, 1000, 1100, 1200, 1300,
+  1400, 1500, 1600, 1700, 1800, 1900, 2048
+};
+
+static const uint16_t gripper_cal_open_x10_table[GRIPPER_CAL_TABLE_SIZE] = {
+  1000, 889, 792, 681, 583, 486, 403,
+  333, 250, 194, 139, 83, 42, 0
+};
+
 static uint8_t Gripper_PositionValid(uint16_t position)
 {
   return ((position >= GRIPPER_POS_OPEN_MAX) && (position <= GRIPPER_POS_CLOSE_MIN)) ? 1 : 0;
@@ -309,6 +321,83 @@ GripperResult Gripper_Open(uint8_t servo_id, uint16_t speed, BusServoResult *ser
 GripperResult Gripper_Close(uint8_t servo_id, uint16_t speed, BusServoResult *servo_result)
 {
   return Gripper_MoveFeedback(servo_id, GRIPPER_POS_CLOSE_MIN, speed, 0, servo_result);
+}
+
+uint16_t Gripper_PositionToOpenPercentX10(uint16_t position)
+{
+  uint8_t i;
+  uint32_t numerator;
+  uint16_t x1;
+  uint16_t x2;
+  uint16_t y1;
+  uint16_t y2;
+
+  if (position <= gripper_cal_pos_table[0])
+  {
+    return gripper_cal_open_x10_table[0];
+  }
+
+  if (position >= gripper_cal_pos_table[GRIPPER_CAL_TABLE_SIZE - 1U])
+  {
+    return gripper_cal_open_x10_table[GRIPPER_CAL_TABLE_SIZE - 1U];
+  }
+
+  for (i = 0; i < (GRIPPER_CAL_TABLE_SIZE - 1U); i++)
+  {
+    x1 = gripper_cal_pos_table[i];
+    x2 = gripper_cal_pos_table[i + 1U];
+    if (position <= x2)
+    {
+      y1 = gripper_cal_open_x10_table[i];
+      y2 = gripper_cal_open_x10_table[i + 1U];
+      numerator = ((uint32_t)(y1 - y2) * (position - x1)) + ((x2 - x1) / 2U);
+      return (uint16_t)(y1 - (uint16_t)(numerator / (x2 - x1)));
+    }
+  }
+
+  return gripper_cal_open_x10_table[GRIPPER_CAL_TABLE_SIZE - 1U];
+}
+
+uint16_t Gripper_OpenPercentToPosition(uint16_t open_percent)
+{
+  uint8_t i;
+  uint16_t open_x10;
+  uint16_t x1;
+  uint16_t x2;
+  uint16_t y1;
+  uint16_t y2;
+  uint32_t numerator;
+
+  if (open_percent > 100U)
+  {
+    open_percent = 100U;
+  }
+  open_x10 = (uint16_t)(open_percent * 10U);
+
+  if (open_x10 >= gripper_cal_open_x10_table[0])
+  {
+    return gripper_cal_pos_table[0];
+  }
+
+  if (open_x10 <= gripper_cal_open_x10_table[GRIPPER_CAL_TABLE_SIZE - 1U])
+  {
+    return gripper_cal_pos_table[GRIPPER_CAL_TABLE_SIZE - 1U];
+  }
+
+  for (i = 0; i < (GRIPPER_CAL_TABLE_SIZE - 1U); i++)
+  {
+    y1 = gripper_cal_open_x10_table[i];
+    y2 = gripper_cal_open_x10_table[i + 1U];
+    if (open_x10 >= y2)
+    {
+      x1 = gripper_cal_pos_table[i];
+      x2 = gripper_cal_pos_table[i + 1U];
+      numerator = ((uint32_t)(y1 - open_x10) * (x2 - x1)) + ((y1 - y2) / 2U);
+      return (uint16_t)(x1 + (uint16_t)(numerator / (y1 - y2)));
+    }
+  }
+
+  return gripper_cal_pos_table[GRIPPER_CAL_TABLE_SIZE - 1U];
 }
 
 const char *Gripper_ResultName(GripperResult result)

@@ -94,32 +94,12 @@ static uint8_t Ros_ParseU8(const char *text, uint8_t *out)
 
 static uint16_t Ros_ClampOpenPctX10(uint16_t position)
 {
-  uint32_t span;
-
-  if (position < GRIPPER_POS_OPEN_MAX)
-  {
-    position = GRIPPER_POS_OPEN_MAX;
-  }
-  if (position > GRIPPER_POS_CLOSE_MIN)
-  {
-    position = GRIPPER_POS_CLOSE_MIN;
-  }
-
-  span = (uint32_t)(GRIPPER_POS_CLOSE_MIN - GRIPPER_POS_OPEN_MAX);
-  return (uint16_t)((((uint32_t)(GRIPPER_POS_CLOSE_MIN - position) * 1000U) + (span / 2U)) / span);
+  return Gripper_PositionToOpenPercentX10(position);
 }
 
 static uint16_t Ros_ClampOpenPctToPosition(uint16_t open_pct)
 {
-  uint32_t span;
-
-  if (open_pct > 100)
-  {
-    open_pct = 100;
-  }
-
-  span = (uint32_t)(GRIPPER_POS_CLOSE_MIN - GRIPPER_POS_OPEN_MAX);
-  return (uint16_t)(GRIPPER_POS_CLOSE_MIN - ((span * open_pct + 50U) / 100U));
+  return Gripper_OpenPercentToPosition(open_pct);
 }
 
 static uint8_t Ros_ParseClampPosition(const char *text, uint16_t *position)

@@ -28,6 +28,7 @@
 #define GRIPPER_RELEASE_SPEED_DEFAULT        500
 #define GRIPPER_RELEASE_SPEED_MIN            100
 #define GRIPPER_RELEASE_SPEED_MAX            1000
+#define GRIPPER_OPEN_PERCENT_X10_MAX         1000
 
 typedef enum {
   GRIPPER_OK = 0,
@@ -52,6 +53,8 @@ GripperResult Gripper_Release(uint8_t servo_id, uint16_t delta, uint16_t speed,
                               BusServoStatus *final_status, BusServoResult *servo_result);
 GripperResult Gripper_Open(uint8_t servo_id, uint16_t speed, BusServoResult *servo_result);
 GripperResult Gripper_Close(uint8_t servo_id, uint16_t speed, BusServoResult *servo_result);
+uint16_t Gripper_PositionToOpenPercentX10(uint16_t position);
+uint16_t Gripper_OpenPercentToPosition(uint16_t open_percent);
 const char *Gripper_ResultName(GripperResult result);
 
 #endif

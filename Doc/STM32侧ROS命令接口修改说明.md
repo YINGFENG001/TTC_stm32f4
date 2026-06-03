@@ -21,9 +21,9 @@
   ROS 侧 `move` 启动成功回显会附加 `dir=CW/CCW`，连续运行时还会附加 `continuous=1`。
 - 新增夹爪命令处理：
   `status`、`move`、`open`、`close`、`grip`、`release`。
-  - `move [openPos/Pct]` 支持夹爪绝对位置 `700~2048` 或开度百分比 `0%~100%`，其中 `100%` 等同 `700`。
+  - `move [openPos/Pct]` 支持夹爪绝对位置 `700~2048` 或实测物理开度百分比 `0%~100%`，其中 `100%` 等同 `700`，对应最大张开约 `72mm`。
   - `grip [load] [openPos/Pct]` 中 `openPos/Pct` 为可选参数。
-  - 夹爪状态和动作返回中的位置统一显示为 `openPos/Pct = 700 (100.0%)`。
+  - 夹爪状态和动作返回中的位置统一显示为 `openPos/Pct = 700 (100.0%)`，百分比由实测标定表插值得出。
 - 新增吸盘命令处理：
   `set`、`grip`、`release`、`stop`、`status`。
 - 吸盘设备名同时兼容 `vacum` 和 `vacuum`。
@@ -98,4 +98,4 @@
 - 步进电机 `move` 是异步动作：启动成功先输出 `@ack`，完成后由 `Device_ReportDone()` 输出 `@done`。
 - 夹爪和吸盘当前动作是同步调用：动作完成或底层调用返回后直接输出 `@done` 或 `@ack`。
 - 全局 `#<id> status` 必须以 `@done id=<id> dev=system cmd=status result=ok` 结束，避免 ROS 侧一直等待。
-- 协议字段保持无中文；夹爪位置字段当前使用 `openPos/Pct = pos (pct%)` 的双格式显示。
+- 协议字段保持无中文；夹爪位置字段当前使用 `openPos/Pct = pos (pct%)` 的双格式显示，`pct` 为实测物理开度百分比。

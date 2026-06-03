@@ -188,8 +188,8 @@ static void ShowCommandHelp(void)
   printf("\n  clamp readreg [addr: 0~255]");
   printf("\n  clamp open");
   printf("\n  clamp close");
-  printf("\n  clamp move [openPos/Pct: 700~2048 or 0%%~100%%]");
-  printf("\n  clamp grip [load: 100~900(0.1%%)] [openPos/Pct: 700~2048 or 0%%~100%%, optional]");
+  printf("\n  clamp move [openPos/Pct: 700~2048 or measured 0%%~100%%]");
+  printf("\n  clamp grip [load: 100~900(0.1%%)] [openPos/Pct: 700~2048 or measured 0%%~100%%, optional]");
   printf("\n  clamp release");
   printf("\n  clamp set [speed: 1~3000] [gripStep: 5~100] [releaseDelta: 20~400]");
   printf("\n  vacum set [min_vac:0~100(%%)] [max_vac:0~100(%%)] [timeout:1~255(100ms)]");
@@ -218,7 +218,7 @@ void ShowHelp(void)
   printf("\n       set   = accel/decel(rpm/s), gear xx:1, micro");
   printf("\n       stop  = 立即停止当前运动并保持当前位置");
   printf("\n  clamp position = 700~2048");
-  printf("\n        move     = openPos/Pct, e.g. 700 or 100%%");
+  printf("\n        move     = openPos/Pct, e.g. 700 or measured 100%%");
   printf("\n        default  = speed 1000, gripStep 30, releaseDelta 100");
   printf("\n        load     = 0.1%%");
   printf("\n        current  = 6.5mA");
