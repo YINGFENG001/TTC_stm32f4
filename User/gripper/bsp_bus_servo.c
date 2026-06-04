@@ -6,6 +6,10 @@
 #define BUS_SERVO_MAX_PARAM_LEN             16
 #define BUS_SERVO_TX_TIMEOUT_MS             20
 #define BUS_SERVO_RX_TIMEOUT_MS             30
+#define BUS_SERVO_PROTECTION_TORQUE_DEFAULT 20
+#define BUS_SERVO_PROTECTION_TIME_DEFAULT   200
+#define BUS_SERVO_OVERLOAD_TORQUE_DEFAULT   80
+#define BUS_SERVO_PROTECTION_WRITE_RETRY    2
 
 #ifndef TRUE
 #define TRUE                                1
@@ -19,6 +23,9 @@ static BusServoResult BusServo_RecvPacketChecked(uint8_t expected_id, uint8_t *p
                                                  uint8_t expected_param_len,
                                                  uint8_t *servo_error,
                                                  uint8_t fail_on_servo_error);
+static void BusServo_InitProtection(uint8_t servo_id);
+static BusServoResult BusServo_EnsureProtectionByte(uint8_t servo_id, uint8_t address,
+                                                    uint8_t value);
 
 static uint8_t BusServo_Checksum(uint8_t id, uint8_t length, uint8_t instruction, const uint8_t *params)
 {
@@ -196,6 +203,67 @@ static void BusServo_WriteUint16(uint8_t *data, uint16_t value)
 void BusServo_Init(void)
 {
   Gripper_UART_Config();
+  delay_ms(20);
+  BusServo_InitProtection(BUS_SERVO_DEFAULT_ID);
+}
+
+static void BusServo_InitProtection(uint8_t servo_id)
+{
+  uint8_t servo_error;
+  uint8_t torque_off;
+
+  servo_error = 0;
+  torque_off = 0;
+  (void)BusServo_WriteData(servo_id, BUS_SERVO_ADDR_TORQUE_ENABLE,
+                           &torque_off, 1, &servo_error);
+
+  (void)BusServo_EnsureProtectionByte(servo_id,
+                                      BUS_SERVO_ADDR_PROTECTION_TORQUE,
+                                      BUS_SERVO_PROTECTION_TORQUE_DEFAULT);
+  (void)BusServo_EnsureProtectionByte(servo_id,
+                                      BUS_SERVO_ADDR_PROTECTION_TIME,
+                                      BUS_SERVO_PROTECTION_TIME_DEFAULT);
+  (void)BusServo_EnsureProtectionByte(servo_id,
+                                      BUS_SERVO_ADDR_OVERLOAD_TORQUE,
+                                      BUS_SERVO_OVERLOAD_TORQUE_DEFAULT);
+}
+
+static BusServoResult BusServo_EnsureProtectionByte(uint8_t servo_id, uint8_t address,
+                                                    uint8_t value)
+{
+  uint8_t servo_error;
+  uint8_t current;
+  uint8_t retry;
+  BusServoResult result;
+
+  for (retry = 0; retry < BUS_SERVO_PROTECTION_WRITE_RETRY; retry++)
+  {
+    servo_error = 0;
+    current = 0;
+    result = BusServo_ReadData(servo_id, address, 1, &current, &servo_error);
+    if ((result == BUS_SERVO_OK) && (current == value))
+    {
+      return BUS_SERVO_OK;
+    }
+
+    servo_error = 0;
+    result = BusServo_WriteData(servo_id, address, &value, 1, &servo_error);
+    if (result != BUS_SERVO_OK)
+    {
+      continue;
+    }
+
+    delay_ms(20);
+  }
+
+  servo_error = 0;
+  current = 0;
+  result = BusServo_ReadData(servo_id, address, 1, &current, &servo_error);
+  if ((result == BUS_SERVO_OK) && (current == value))
+  {
+    return BUS_SERVO_OK;
+  }
+  return result;
 }
 
 BusServoResult BusServo_Ping(uint8_t servo_id, uint8_t *servo_error)

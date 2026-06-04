@@ -16,7 +16,6 @@
   */
   
 #include "./key/bsp_exti.h"
-#include "./led/bsp_led.h"   
 #include "./stepper/bsp_stepper_init.h"
 #include "./stepper/bsp_stepper_T_speed.h"
 
@@ -66,8 +65,6 @@ void KEY1_IRQHandler(void)
   //确保是否产生了EXTI Line中断
 	if(__HAL_GPIO_EXTI_GET_IT(KEY1_INT_GPIO_PIN) != RESET) 
 	{
-		/*LED1反转*/
-		LED1_TOGGLE;
 		MSD_ENA(DISABLE);
 		//清除中断标志位
 		__HAL_GPIO_EXTI_CLEAR_IT(KEY1_INT_GPIO_PIN);     
@@ -79,8 +76,6 @@ void KEY2_IRQHandler(void)
   //确保是否产生了EXTI Line中断
 	if(__HAL_GPIO_EXTI_GET_IT(KEY2_INT_GPIO_PIN) != RESET) 
 	{
-		/*LED2反转*/
-		LED2_TOGGLE;
 		MSD_ENA(ENABLE);
 		//清除中断标志位
 		__HAL_GPIO_EXTI_CLEAR_IT(KEY2_INT_GPIO_PIN);     

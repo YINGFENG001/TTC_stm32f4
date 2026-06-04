@@ -17,7 +17,7 @@
 #define GRIPPER_STALL_HIT_LIMIT              3
 #define GRIPPER_GRIP_LOAD_DEFAULT            400
 #define GRIPPER_GRIP_LOAD_MIN                100
-#define GRIPPER_GRIP_LOAD_MAX                900
+#define GRIPPER_GRIP_LOAD_MAX                750
 #define GRIPPER_GRIP_STEP_DEFAULT            30
 #define GRIPPER_GRIP_STEP_MIN                5
 #define GRIPPER_GRIP_STEP_MAX                100

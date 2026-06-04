@@ -11,6 +11,16 @@
 #include "./gripper/bsp_clamp_ctl.h"
 #include "./vacum/bsp_vacum_ctl.h"
 #include "./ros/bsp_ros_protocol.h"
+#include "./led/bsp_led.h"
+
+#define DEVICE_HEALTH_POLL_INTERVAL_MS       5000U
+#define DEVICE_LED_BLINK_HALF_PERIOD_MS      500U
+
+typedef enum {
+  DEVICE_LED_NORMAL = 0,
+  DEVICE_LED_COMM_DOWN,
+  DEVICE_LED_ERROR
+} DeviceLedState;
 
 EndDevice devices[DEVICE_NUM] = {
   {DEVICE_MTOR1, "mtor1", DEVICE_TYPE_STEPPER, DEV_IDLE,      TRUE, 0, 0, 0, 0, FALSE, 0, 0},
@@ -23,6 +33,23 @@ static int Device_FindByName(const char *name);
 static void Device_PrintFullStatus(void);
 static void ShowCommandHelp(void);
 static void Command_Dispatch(char *line);
+static void Device_HealthTask(uint32_t now);
+static void Device_HealthPoll(void);
+static void Device_HealthSyncRuntimeErrors(void);
+static DeviceLedState Device_HealthPollStepper(uint8_t device_id);
+static DeviceLedState Device_HealthPollClamp(void);
+static DeviceLedState Device_HealthPollVacum(void);
+static DeviceLedState Device_HealthFromApiResult(DeviceApiResult result);
+static DeviceLedState Device_HealthFromDeviceError(uint8_t device_id);
+static void Device_LedRefresh(uint32_t now);
+static void Device_SetLed(uint8_t device_id, GPIO_PinState state);
+
+static DeviceLedState device_led_state[DEVICE_NUM] = {
+  DEVICE_LED_NORMAL,
+  DEVICE_LED_NORMAL,
+  DEVICE_LED_COMM_DOWN,
+  DEVICE_LED_COMM_DOWN
+};
 
 static int Device_FindByName(const char *name)
 {
@@ -93,6 +120,187 @@ void Device_Task(void)
 
   Clamp_HoldTask(now);
   Vacum_MonitorTask(now);
+  Device_HealthTask(now);
+}
+
+static void Device_HealthTask(uint32_t now)
+{
+  static uint32_t last_poll_tick = 0;
+
+  Device_HealthSyncRuntimeErrors();
+
+  if ((last_poll_tick == 0) ||
+      ((now - last_poll_tick) >= DEVICE_HEALTH_POLL_INTERVAL_MS))
+  {
+    last_poll_tick = now;
+    Device_HealthPoll();
+  }
+
+  Device_LedRefresh(now);
+}
+
+static void Device_HealthPoll(void)
+{
+  device_led_state[DEVICE_MTOR1] = Device_HealthPollStepper(DEVICE_MTOR1);
+  device_led_state[DEVICE_MTOR2] = Device_HealthPollStepper(DEVICE_MTOR2);
+  device_led_state[DEVICE_CLAMP] = Device_HealthPollClamp();
+  device_led_state[DEVICE_VACUM] = Device_HealthPollVacum();
+}
+
+static void Device_HealthSyncRuntimeErrors(void)
+{
+  uint8_t i;
+
+  for (i = 0; i < DEVICE_NUM; i++)
+  {
+    if (devices[i].state != DEV_ERROR)
+    {
+      if (device_led_state[i] == DEVICE_LED_COMM_DOWN)
+      {
+        device_led_state[i] = DEVICE_LED_NORMAL;
+      }
+      continue;
+    }
+
+    if (((i == DEVICE_CLAMP) || (i == DEVICE_VACUM)) &&
+        (device_led_state[i] == DEVICE_LED_COMM_DOWN) &&
+        (devices[i].error_code != DEVICE_FAULT_DROP))
+    {
+      continue;
+    }
+
+    device_led_state[i] = Device_HealthFromDeviceError(i);
+  }
+}
+
+static DeviceLedState Device_HealthPollStepper(uint8_t device_id)
+{
+  if (devices[device_id].state == DEV_ERROR)
+  {
+    return DEVICE_LED_ERROR;
+  }
+  return DEVICE_LED_NORMAL;
+}
+
+static DeviceLedState Device_HealthPollClamp(void)
+{
+  DeviceApiResult result;
+  DeviceClampStatus status;
+
+  if ((devices[DEVICE_CLAMP].state == DEV_ERROR) &&
+      (devices[DEVICE_CLAMP].error_code == DEVICE_FAULT_DROP))
+  {
+    return DEVICE_LED_ERROR;
+  }
+
+  result = DeviceApi_ClampStatus(GRIPPER_SERVO_ID_DEFAULT, &status);
+  if (result != DEVICE_API_OK)
+  {
+    return Device_HealthFromApiResult(result);
+  }
+
+  if (status.state != 0)
+  {
+    return DEVICE_LED_ERROR;
+  }
+  return DEVICE_LED_NORMAL;
+}
+
+static DeviceLedState Device_HealthPollVacum(void)
+{
+  DeviceApiResult result;
+  DeviceVacumStatus status;
+
+  if ((devices[DEVICE_VACUM].state == DEV_ERROR) &&
+      (devices[DEVICE_VACUM].error_code == DEVICE_FAULT_DROP))
+  {
+    return DEVICE_LED_ERROR;
+  }
+
+  result = DeviceApi_VacumStatus(&status);
+  if (result != DEVICE_API_OK)
+  {
+    return Device_HealthFromApiResult(result);
+  }
+
+  if (status.fault != 0)
+  {
+    return DEVICE_LED_ERROR;
+  }
+  return DEVICE_LED_NORMAL;
+}
+
+static DeviceLedState Device_HealthFromDeviceError(uint8_t device_id)
+{
+  if (devices[device_id].error_code == DEVICE_FAULT_DROP)
+  {
+    return DEVICE_LED_ERROR;
+  }
+  return DEVICE_LED_ERROR;
+}
+
+static DeviceLedState Device_HealthFromApiResult(DeviceApiResult result)
+{
+  switch (result)
+  {
+    case DEVICE_API_OK:
+      return DEVICE_LED_NORMAL;
+    case DEVICE_API_UART_ERROR:
+    case DEVICE_API_TIMEOUT:
+    case DEVICE_API_CRC_ERROR:
+    case DEVICE_API_ID_ERROR:
+      return DEVICE_LED_COMM_DOWN;
+    default:
+      return DEVICE_LED_ERROR;
+  }
+}
+
+static void Device_LedRefresh(uint32_t now)
+{
+  uint8_t i;
+  GPIO_PinState state;
+  uint8_t blink_on;
+
+  blink_on = (((now / DEVICE_LED_BLINK_HALF_PERIOD_MS) % 2U) == 0U) ? TRUE : FALSE;
+
+  for (i = 0; i < DEVICE_NUM; i++)
+  {
+    switch (device_led_state[i])
+    {
+      case DEVICE_LED_NORMAL:
+        state = LED_ON;
+        break;
+      case DEVICE_LED_ERROR:
+        state = (blink_on == TRUE) ? LED_ON : LED_OFF;
+        break;
+      case DEVICE_LED_COMM_DOWN:
+      default:
+        state = LED_OFF;
+        break;
+    }
+    Device_SetLed(i, state);
+  }
+}
+
+static void Device_SetLed(uint8_t device_id, GPIO_PinState state)
+{
+  switch (device_id)
+  {
+    case DEVICE_MTOR1:
+      LED1(state);
+      break;
+    case DEVICE_MTOR2:
+      LED2(state);
+      break;
+    case DEVICE_CLAMP:
+      LED3(state);
+      break;
+    case DEVICE_VACUM:
+      LED4(state);
+      break;
+    default:
+      break;
+  }
 }
 
 void Device_ReportDone(void)
@@ -189,7 +397,7 @@ static void ShowCommandHelp(void)
   printf("\n  clamp open");
   printf("\n  clamp close");
   printf("\n  clamp move [openPos/Pct: 700~2048 or measured 0%%~100%%]");
-  printf("\n  clamp grip [load: 100~900(0.1%%)] [openPos/Pct: 700~2048 or measured 0%%~100%%, optional]");
+  printf("\n  clamp grip [load: 100~750(0.1%%)] [openPos/Pct: 700~2048 or measured 0%%~100%%, optional]");
   printf("\n  clamp release");
   printf("\n  clamp set [speed: 1~3000] [gripStep: 5~100] [releaseDelta: 20~400]");
   printf("\n  vacum set [min_vac:0~100(%%)] [max_vac:0~100(%%)] [timeout:1~255(100ms)]");

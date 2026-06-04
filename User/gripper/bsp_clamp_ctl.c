@@ -29,7 +29,7 @@ typedef struct {
 
 #define CLAMP_DROP_LOW_LOAD_PERCENT    40U
 #define CLAMP_DROP_LOW_LOAD_HITS       5U
-#define CLAMP_DROP_RECOVERY_POS_DELTA  80U
+#define CLAMP_DROP_RECOVERY_POS_DELTA  200U
 #define CLAMP_GRIP_FINE_STEP           10U
 #define CLAMP_GRIP_PRELOAD_PERCENT     60U
 #define CLAMP_HOLD_ADJUST_PRINT_INTERVAL_MS 2000U
@@ -390,7 +390,7 @@ static int16_t Clamp_HoldCalcDelta(int16_t error)
 }
 
 static uint8_t Clamp_HoldCheckDrop(const BusServoStatus *status_data, int16_t load_abs,
-                                   int16_t delta_pos, uint16_t next_pos)
+                                   int16_t delta_pos)
 {
   uint16_t low_load_limit;
   uint16_t recovery_delta;
@@ -406,11 +406,11 @@ static uint8_t Clamp_HoldCheckDrop(const BusServoStatus *status_data, int16_t lo
 
   if (clamp_hold.low_load_hits == 0)
   {
-    clamp_hold.low_load_start_pos = clamp_hold.last_target_pos;
+    clamp_hold.low_load_start_pos = Clamp_LimitPosition(status_data->position);
   }
   clamp_hold.low_load_hits++;
-  recovery_delta = (next_pos >= clamp_hold.low_load_start_pos) ?
-                   (uint16_t)(next_pos - clamp_hold.low_load_start_pos) : 0;
+  recovery_delta = (status_data->position >= (int16_t)clamp_hold.low_load_start_pos) ?
+                   (uint16_t)(status_data->position - (int16_t)clamp_hold.low_load_start_pos) : 0;
   if ((clamp_hold.low_load_hits < CLAMP_DROP_LOW_LOAD_HITS) ||
       (recovery_delta < CLAMP_DROP_RECOVERY_POS_DELTA))
   {
@@ -504,7 +504,7 @@ void Clamp_HoldTask(uint32_t now)
     clamp_hold.last_target_pos = Clamp_LimitPosition(status_data.position);
   }
   next_pos = Clamp_LimitPosition((int32_t)clamp_hold.last_target_pos + delta_pos);
-  if (Clamp_HoldCheckDrop(&status_data, load_abs, delta_pos, next_pos) == TRUE)
+  if (Clamp_HoldCheckDrop(&status_data, load_abs, delta_pos) == TRUE)
   {
     return;
   }

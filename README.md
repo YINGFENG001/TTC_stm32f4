@@ -112,7 +112,7 @@ clamp set [speed] [gripStep] [releaseDelta]
 单位：
 
 - `openPos/Pct`：支持绝对位置 `700~2048` 或实测物理开度百分比 `0%~100%`；`700` = `100%` 最大张开，实测开口约 `72mm`，`2048` = `0%` 闭合，例如 `clamp move 100%` 与 `clamp move 700` 等同
-- `load`：`0.1%`
+- `load`：`0.1%`，范围 `100~750`
 - `speed`：`1~3000`，默认 `1000`
 - `gripStep`：`5~100`，默认 `30`
 - `releaseDelta`：`20~400`，默认 `100`
@@ -125,6 +125,7 @@ clamp set [speed] [gripStep] [releaseDelta]
 - `100%` 最大张开对应实测开口约 `72mm`，百分比表示相对该最大物理开口的开度。
 - 百分比不是按 `pos` 线性比例计算，而是按实测物理开度标定表插值：
   `700=100.0%`、`800=88.9%`、`900=79.2%`、`1000=68.1%`、`1100=58.3%`、`1200=48.6%`、`1300=40.3%`、`1400=33.3%`、`1500=25.0%`、`1600=19.4%`、`1700=13.9%`、`1800=8.3%`、`1900=4.2%`、`2048=0.0%`。
+- 初始化时会逐项校验舵机保护参数：地址 `34/0x22` 保护扭矩 `20%`，地址 `35/0x23` 保护时间 `200*10ms=2s`，地址 `36/0x24` 过载扭矩 `80%`；读出值不一致时才写入，减少 EEPROM 重复写入。
 
 保护逻辑：
 
@@ -135,8 +136,9 @@ clamp set [speed] [gripStep] [releaseDelta]
 - `grip [load] [openPos/Pct]` 中 `openPos/Pct` 为可选参数；不填时从当前位置开始精细闭合。
 - `grip` 使用两阶段夹取：可选先运动到 `openPos/Pct`，再用 `10 step` 精细闭合到目标负载的 `60%`，随后进入 PI 保力。
 - 设备快速检测周期固定为 `200ms`；PI 保力和吸盘掉落检测使用该周期。
+- 4 个 LED 对应 `mtor1/mtor2/clamp/vacum` 健康状态：正常常亮，通信断联常灭，设备错误约 `1Hz` 闪烁；夹爪和吸盘每约 `5s` 做一次低频 `status` 查询。
 - PI 保力非稳定调整日志最短 `2000ms` 打印一次，稳定保持日志最短 `20000ms` 打印一次；稳定判断为负载绝对误差 `20`。
-- PI 保力中如果负载连续 5 次低于目标负载的 `40%`，且为了恢复负载累计闭合推进超过 `80 position`，会判定物品掉落并关闭扭矩。
+- PI 保力中如果负载连续 5 次低于目标负载的 `40%`，且实际读取位置累计闭合推进超过 `200 position`，会判定物品掉落并关闭扭矩。
 
 ### EVS08 真空吸盘
 
@@ -202,7 +204,6 @@ vacum release
 
 ## 说明文档
 
-- [Doc/双电机步进控制修改说明.md](D:/XGKJproject/stm32f4/DEVELOPING/Doc/双电机步进控制修改说明.md)
-- [Doc/双电机停止命令与方向修正方案.md](D:/XGKJproject/stm32f4/DEVELOPING/Doc/双电机停止命令与方向修正方案.md)
-- [Doc/舵机夹爪控制修改说明.md](D:/XGKJproject/stm32f4/DEVELOPING/Doc/舵机夹爪控制修改说明.md)
-- [Doc/EVS08电动吸盘RS485控制方案.md](D:/XGKJproject/stm32f4/DEVELOPING/Doc/EVS08电动吸盘RS485控制方案.md)
+- [Doc/末端外设控制说明.md](D:/XGKJproject/stm32f4/DEVELOPING/Doc/末端外设控制说明.md)
+- [Doc/STM32内部功能与程序流程说明.md](D:/XGKJproject/stm32f4/DEVELOPING/Doc/STM32内部功能与程序流程说明.md)
+- [Doc/后续实现.md](D:/XGKJproject/stm32f4/DEVELOPING/Doc/后续实现.md)
