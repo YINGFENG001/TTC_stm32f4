@@ -167,7 +167,7 @@ ROS 命令必须以 `#<id>` 开头，例如：
 
 - 非 `#` 开头返回 `FALSE`，交给人工命令处理。
 - `id` 必须为正整数。
-- 支持设备：`mtor1`、`mtor2`、`clamp`、`vacum`、`vacuum`。
+- 支持设备：`mtor1`、`mtor2`、`clamp`、`vacum`。
 - `#<id> status` 会依次上报两路电机、夹爪、吸盘，最后输出 `@done id=<id> dev=system cmd=status result=ok`。
 
 输出约定：

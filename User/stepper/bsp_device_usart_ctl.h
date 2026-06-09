@@ -36,6 +36,9 @@ typedef struct {
   uint32_t accel_rpm_s;
   uint32_t decel_rpm_s;
   uint32_t rpm;
+  uint16_t gear_num;
+  uint16_t gear_den;
+  uint16_t micro;
 } DeviceStepperStatus;
 
 typedef struct {
@@ -71,6 +74,9 @@ DeviceApiResult DeviceApi_StepperSetAccel(uint8_t motor_id, uint32_t accel);
 DeviceApiResult DeviceApi_StepperSetDecel(uint8_t motor_id, uint32_t decel);
 DeviceApiResult DeviceApi_StepperSetRpm(uint8_t motor_id, uint32_t rpm);
 DeviceApiResult DeviceApi_StepperSetSignedRpm(uint8_t motor_id, int32_t rpm);
+DeviceApiResult DeviceApi_StepperSet(uint8_t motor_id, uint32_t accel, uint32_t decel,
+                                     uint16_t gear_num, uint16_t gear_den,
+                                     uint16_t micro);
 void DeviceApi_BindStepperRosCmd(uint8_t motor_id, uint32_t id, const char *cmd);
 
 DeviceApiResult DeviceApi_ClampStatus(uint8_t servo_id, DeviceClampStatus *out);

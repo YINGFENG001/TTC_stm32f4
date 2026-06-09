@@ -206,4 +206,5 @@ vacum release
 
 - [Doc/末端外设控制说明.md](D:/XGKJproject/stm32f4/DEVELOPING/Doc/末端外设控制说明.md)
 - [Doc/STM32内部功能与程序流程说明.md](D:/XGKJproject/stm32f4/DEVELOPING/Doc/STM32内部功能与程序流程说明.md)
+- [Doc/串口命令说明.md](D:/XGKJproject/stm32f4/DEVELOPING/Doc/串口命令说明.md)
 - [Doc/后续实现.md](D:/XGKJproject/stm32f4/DEVELOPING/Doc/后续实现.md)

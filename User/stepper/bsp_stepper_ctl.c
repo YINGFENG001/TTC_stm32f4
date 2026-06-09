@@ -569,6 +569,9 @@ DeviceApiResult DeviceApi_StepperStatus(uint8_t motor_id, DeviceStepperStatus *o
   out->accel_rpm_s = stepper_cfg[motor_id].param.accel_rpm_s;
   out->decel_rpm_s = stepper_cfg[motor_id].param.decel_rpm_s;
   out->rpm = stepper_cfg[motor_id].param.rpm;
+  out->gear_num = stepper_cfg[motor_id].mech.gear_num;
+  out->gear_den = stepper_cfg[motor_id].mech.gear_den;
+  out->micro = stepper_cfg[motor_id].mech.micro_step;
   return DEVICE_API_OK;
 }
 
@@ -822,6 +825,53 @@ DeviceApiResult DeviceApi_StepperSetSignedRpm(uint8_t motor_id, int32_t rpm)
   return DEVICE_API_OK;
 }
 
+DeviceApiResult DeviceApi_StepperSet(uint8_t motor_id, uint32_t accel, uint32_t decel,
+                                     uint16_t gear_num, uint16_t gear_den,
+                                     uint16_t micro)
+{
+  StepperDeviceConfig old_cfg;
+  StepperRuntimeSnapshot snapshot;
+
+  if (!STEPPER_ID_VALID(motor_id))
+  {
+    return DEVICE_API_ID_ERROR;
+  }
+
+  if ((micro < MTOR_MIN_MICRO_STEP) || (micro > MTOR_MAX_MICRO_STEP) ||
+      (gear_num < MTOR_MIN_GEAR_NUM) || (gear_num > MTOR_MAX_GEAR_NUM) ||
+      (gear_den < MTOR_MIN_GEAR_DEN) || (gear_den > MTOR_MAX_GEAR_DEN))
+  {
+    return DEVICE_API_PARAM_ERROR;
+  }
+
+  if (Stepper_GetRuntimeSnapshot(motor_id, &snapshot) != TRUE)
+  {
+    return DEVICE_API_PARAM_ERROR;
+  }
+
+  if (snapshot.running == TRUE)
+  {
+    return DEVICE_API_BUSY;
+  }
+
+  old_cfg = stepper_cfg[motor_id];
+  stepper_cfg[motor_id].param.accel_rpm_s = accel;
+  stepper_cfg[motor_id].param.decel_rpm_s = decel;
+  stepper_cfg[motor_id].mech.gear_num = gear_num;
+  stepper_cfg[motor_id].mech.gear_den = gear_den;
+  stepper_cfg[motor_id].mech.micro_step = micro;
+
+  if ((Stepper_CheckUserRange(motor_id, &stepper_cfg[motor_id].param) != TRUE) ||
+      (Stepper_CheckMotorEquivalentRange(motor_id, &stepper_cfg[motor_id].param) != TRUE))
+  {
+    stepper_cfg[motor_id] = old_cfg;
+    return DEVICE_API_RANGE_ERROR;
+  }
+
+  Stepper_UpdateMotorPulses(motor_id);
+  return DEVICE_API_OK;
+}
+
 void DeviceApi_BindStepperRosCmd(uint8_t motor_id, uint32_t id, const char *cmd)
 {
   if (!STEPPER_ID_VALID(motor_id))
@@ -998,29 +1048,16 @@ static void Stepper_CommandRpm(uint8_t motor_id, int argc, char *argv[])
 
 static void Stepper_CommandSet(uint8_t motor_id, int argc, char *argv[])
 {
-  StepperDeviceConfig old_cfg;
-  StepperRuntimeSnapshot snapshot;
   uint32_t accel;
   uint32_t decel;
   uint32_t micro;
   uint16_t gear_num;
   uint16_t gear_den;
+  DeviceApiResult api_result;
 
   if (argc != 6)
   {
     printf("\n%s set param_error", devices[motor_id].name);
-    return;
-  }
-
-  if (Stepper_GetRuntimeSnapshot(motor_id, &snapshot) != TRUE)
-  {
-    printf("\n%s set param_error", devices[motor_id].name);
-    return;
-  }
-
-  if (snapshot.running == TRUE)
-  {
-    printf("\n%s set busy", devices[motor_id].name);
     return;
   }
 
@@ -1035,23 +1072,25 @@ static void Stepper_CommandSet(uint8_t motor_id, int argc, char *argv[])
     return;
   }
 
-  old_cfg = stepper_cfg[motor_id];
-  stepper_cfg[motor_id].param.accel_rpm_s = accel;
-  stepper_cfg[motor_id].param.decel_rpm_s = decel;
-  stepper_cfg[motor_id].mech.gear_num = gear_num;
-  stepper_cfg[motor_id].mech.gear_den = gear_den;
-  stepper_cfg[motor_id].mech.micro_step = (uint16_t)micro;
-
-  if ((Stepper_CheckUserRange(motor_id, &stepper_cfg[motor_id].param) != TRUE) ||
-      (Stepper_CheckMotorEquivalentRange(motor_id, &stepper_cfg[motor_id].param) != TRUE))
+  api_result = DeviceApi_StepperSet(motor_id, accel, decel, gear_num, gear_den, (uint16_t)micro);
+  if (api_result == DEVICE_API_BUSY)
   {
-    stepper_cfg[motor_id] = old_cfg;
+    printf("\n%s set busy", devices[motor_id].name);
+    return;
+  }
+  if (api_result == DEVICE_API_RANGE_ERROR)
+  {
     printf("\n%s set range_error", devices[motor_id].name);
     Stepper_PrintSetting(motor_id);
     return;
   }
+  if (api_result != DEVICE_API_OK)
+  {
+    printf("\n%s set param_error", devices[motor_id].name);
+    Stepper_PrintSetting(motor_id);
+    return;
+  }
 
-  Stepper_UpdateMotorPulses(motor_id);
   Stepper_PrintSetting(motor_id);
 }
 

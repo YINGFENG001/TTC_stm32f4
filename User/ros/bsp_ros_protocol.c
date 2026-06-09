@@ -92,6 +92,41 @@ static uint8_t Ros_ParseU8(const char *text, uint8_t *out)
   return TRUE;
 }
 
+static uint8_t Ros_ParseGear(const char *text, uint16_t *gear_num, uint16_t *gear_den)
+{
+  const char *colon;
+  char *end;
+  unsigned long num;
+  unsigned long den;
+
+  if ((text == 0) || (gear_num == 0) || (gear_den == 0))
+  {
+    return FALSE;
+  }
+
+  colon = strchr(text, ':');
+  if (colon == 0)
+  {
+    return FALSE;
+  }
+
+  num = strtoul(text, &end, 10);
+  if ((end != colon) || (num == 0) || (num > 65535UL))
+  {
+    return FALSE;
+  }
+
+  den = strtoul(colon + 1, &end, 10);
+  if ((*end != '\0') || (den == 0) || (den > 65535UL))
+  {
+    return FALSE;
+  }
+
+  *gear_num = (uint16_t)num;
+  *gear_den = (uint16_t)den;
+  return TRUE;
+}
+
 static uint16_t Ros_ClampOpenPctX10(uint16_t position)
 {
   return Gripper_PositionToOpenPercentX10(position);
@@ -206,6 +241,20 @@ static const char *Ros_ResultName(DeviceApiResult ret)
   }
 }
 
+static DeviceApiResult Ros_DeviceApiFromBusServoResult(BusServoResult result)
+{
+  switch (result)
+  {
+    case BUS_SERVO_OK:             return DEVICE_API_OK;
+    case BUS_SERVO_UART_ERROR:     return DEVICE_API_UART_ERROR;
+    case BUS_SERVO_TIMEOUT:        return DEVICE_API_TIMEOUT;
+    case BUS_SERVO_ID_ERROR:       return DEVICE_API_ID_ERROR;
+    case BUS_SERVO_PARAM_ERROR:    return DEVICE_API_PARAM_ERROR;
+    case BUS_SERVO_CHECKSUM_ERROR: return DEVICE_API_CRC_ERROR;
+    default:                       return DEVICE_API_DEVICE_ERROR;
+  }
+}
+
 static uint8_t Ros_StepperMotorId(const char *dev)
 {
   return (strcmp(dev, "mtor1") == 0) ? 0 : 1;
@@ -222,10 +271,11 @@ static void Ros_PrintStepperState(uint32_t id, const char *dev)
   if (ret == DEVICE_API_OK)
   {
     Ros_PrintState(id, dev, "ok");
-    printf(" enabled=%u running=%u rev=%ld target=%ld err=%lu accel=%lu decel=%lu rpm=%lu",
+    printf(" enabled=%u running=%u rev=%ld target=%ld err=%lu accel=%lu decel=%lu rpm=%lu gear=%u:%u micro=%u",
            s.enabled, s.running, (long)s.rev_0p1, (long)s.target_0p1,
            (unsigned long)s.err, (unsigned long)s.accel_rpm_s,
-           (unsigned long)s.decel_rpm_s, (unsigned long)s.rpm);
+           (unsigned long)s.decel_rpm_s, (unsigned long)s.rpm,
+           s.gear_num, s.gear_den, s.micro);
   }
   else
   {
@@ -241,7 +291,11 @@ static void Ros_HandleStepper(uint32_t id, const char *dev, int argc, char *argv
   uint8_t continuous;
   int32_t rev;
   int32_t signed_rpm;
-  uint32_t rpm;
+  uint32_t accel;
+  uint32_t decel;
+  uint16_t gear_num;
+  uint16_t gear_den;
+  uint16_t micro;
   DeviceApiResult ret;
   RosCmdContext ctx;
 
@@ -344,9 +398,7 @@ static void Ros_HandleStepper(uint32_t id, const char *dev, int argc, char *argv
     return;
   }
 
-  if ((strcmp(argv[0], "accel") == 0) ||
-      (strcmp(argv[0], "decel") == 0) ||
-      (strcmp(argv[0], "rpm") == 0))
+  if (strcmp(argv[0], "rpm") == 0)
   {
     if (argc != 2)
     {
@@ -354,53 +406,55 @@ static void Ros_HandleStepper(uint32_t id, const char *dev, int argc, char *argv
       return;
     }
 
-    if (strcmp(argv[0], "accel") == 0)
+    if (Ros_ParseI32(argv[1], &signed_rpm) != TRUE)
     {
-      if (Ros_ParseU32(argv[1], &rpm) != TRUE)
-      {
-        Ros_PrintErr(&ctx, "param_error", 0);
-        return;
-      }
-      ret = DeviceApi_StepperSetAccel(motor_id, rpm);
-    }
-    else if (strcmp(argv[0], "decel") == 0)
-    {
-      if (Ros_ParseU32(argv[1], &rpm) != TRUE)
-      {
-        Ros_PrintErr(&ctx, "param_error", 0);
-        return;
-      }
-      ret = DeviceApi_StepperSetDecel(motor_id, rpm);
-    }
-    else
-    {
-      if (Ros_ParseI32(argv[1], &signed_rpm) != TRUE)
-      {
-        Ros_PrintErr(&ctx, "param_error", 0);
-        return;
-      }
-      ret = DeviceApi_StepperSetSignedRpm(motor_id, signed_rpm);
+      Ros_PrintErr(&ctx, "param_error", 0);
+      return;
     }
 
+    ret = DeviceApi_StepperSetSignedRpm(motor_id, signed_rpm);
     if (ret == DEVICE_API_OK)
     {
       Ros_PrintAck(&ctx, "ok");
-      if (strcmp(argv[0], "rpm") == 0)
+      printf(" value=%ld", (long)signed_rpm);
+      if (signed_rpm == 0)
       {
-        printf(" value=%ld", (long)signed_rpm);
-        if (signed_rpm == 0)
-        {
-          printf(" dir=STOP");
-        }
-        else
-        {
-          printf(" dir=%s", (signed_rpm < 0) ? "CCW" : "CW");
-        }
+        printf(" dir=STOP");
       }
       else
       {
-        printf(" value=%lu", (unsigned long)rpm);
+        printf(" dir=%s", (signed_rpm < 0) ? "CCW" : "CW");
       }
+    }
+    else
+    {
+      Ros_PrintErr(&ctx, Ros_ResultName(ret), 0);
+    }
+    return;
+  }
+
+  if (strcmp(argv[0], "set") == 0)
+  {
+    if ((argc != 5) ||
+        (Ros_ParseU32(argv[1], &accel) != TRUE) ||
+        (Ros_ParseU32(argv[2], &decel) != TRUE) ||
+        (Ros_ParseGear(argv[3], &gear_num, &gear_den) != TRUE) ||
+        (Ros_ParseU16(argv[4], &micro) != TRUE))
+    {
+      Ros_PrintErr(&ctx, "param_error", 0);
+      return;
+    }
+
+    ret = DeviceApi_StepperSet(motor_id, accel, decel, gear_num, gear_den, micro);
+    if (ret == DEVICE_API_OK)
+    {
+      Ros_PrintAck(&ctx, "ok");
+      printf(" accel=%lu decel=%lu gear=%u:%u micro=%u",
+             (unsigned long)accel,
+             (unsigned long)decel,
+             gear_num,
+             gear_den,
+             micro);
     }
     else
     {
@@ -427,7 +481,11 @@ static void Ros_HandleClamp(uint32_t id, int argc, char *argv[])
   uint16_t load;
   uint16_t step;
   uint16_t delta;
+  uint8_t reg_addr;
+  uint8_t reg_value;
   uint8_t servo_id;
+  uint8_t servo_error;
+  BusServoResult servo_result;
   DeviceClampStatus s;
   DeviceApiResult ret;
   RosCmdContext ctx;
@@ -444,6 +502,32 @@ static void Ros_HandleClamp(uint32_t id, int argc, char *argv[])
   ctx.id = id;
   ctx.dev = "clamp";
   ctx.cmd = argv[0];
+
+  if (strcmp(argv[0], "ping") == 0)
+  {
+    if ((argc > 2) || ((argc == 2) && (Ros_ParseU8(argv[1], &servo_id) != TRUE)))
+    {
+      Ros_PrintErr(&ctx, "param_error", 0);
+      return;
+    }
+    if (argc == 1)
+    {
+      servo_id = 10;
+    }
+
+    servo_error = 0;
+    servo_result = BusServo_Ping(servo_id, &servo_error);
+    if (servo_result == BUS_SERVO_OK)
+    {
+      Ros_PrintAck(&ctx, "ok");
+      printf(" servo_id=%u", servo_id);
+    }
+    else
+    {
+      Ros_PrintErr(&ctx, Ros_ResultName(Ros_DeviceApiFromBusServoResult(servo_result)), 0);
+    }
+    return;
+  }
 
   if (strcmp(argv[0], "status") == 0)
   {
@@ -469,6 +553,29 @@ static void Ros_HandleClamp(uint32_t id, int argc, char *argv[])
     else
     {
       Ros_PrintErr(&ctx, Ros_ResultName(ret), 0);
+    }
+    return;
+  }
+
+  if (strcmp(argv[0], "readreg") == 0)
+  {
+    if ((argc != 2) || (Ros_ParseU8(argv[1], &reg_addr) != TRUE))
+    {
+      Ros_PrintErr(&ctx, "param_error", 0);
+      return;
+    }
+
+    servo_error = 0;
+    reg_value = 0;
+    servo_result = BusServo_ReadData(10, reg_addr, 1, &reg_value, &servo_error);
+    if (servo_result == BUS_SERVO_OK)
+    {
+      Ros_PrintState(id, "clamp", "ok");
+      printf(" servo_id=10 addr=%u value=%u", reg_addr, reg_value);
+    }
+    else
+    {
+      Ros_PrintErr(&ctx, Ros_ResultName(Ros_DeviceApiFromBusServoResult(servo_result)), 0);
     }
     return;
   }
@@ -783,7 +890,7 @@ uint8_t RosProtocol_TryDispatch(char *line)
   {
     Ros_HandleClamp(id, argc - 2, &argv[2]);
   }
-  else if ((strcmp(argv[1], "vacum") == 0) || (strcmp(argv[1], "vacuum") == 0))
+  else if (strcmp(argv[1], "vacum") == 0)
   {
     Ros_HandleVacum(id, argc - 2, &argv[2]);
   }
