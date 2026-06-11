@@ -132,15 +132,29 @@ static uint16_t Ros_ClampOpenPctX10(uint16_t position)
   return Gripper_PositionToOpenPercentX10(position);
 }
 
-static uint16_t Ros_ClampOpenPctToPosition(uint16_t open_pct)
+static uint16_t Ros_ClampOpenPctX10ToPosition(uint16_t open_x10)
 {
-  return Gripper_OpenPercentToPosition(open_pct);
+  return Gripper_OpenPercentX10ToPosition(open_x10);
+}
+
+static uint8_t Ros_TextHasPercent(const char *text)
+{
+  while ((text != 0) && (*text != '\0'))
+  {
+    if (*text == '%')
+    {
+      return TRUE;
+    }
+    text++;
+  }
+  return FALSE;
 }
 
 static uint8_t Ros_ParseClampPosition(const char *text, uint16_t *position)
 {
   char *end;
   unsigned long value;
+  uint16_t open_x10;
 
   if ((text == 0) || (position == 0))
   {
@@ -152,27 +166,18 @@ static uint8_t Ros_ParseClampPosition(const char *text, uint16_t *position)
     return FALSE;
   }
 
-  value = strtoul(text, &end, 10);
-  if (end == text)
+  if (Ros_TextHasPercent(text) != FALSE)
   {
-    return FALSE;
-  }
-
-  if (*end == '%')
-  {
-    if (*(end + 1) != '\0')
+    if (Gripper_ParseOpenPercentX10(text, &open_x10) != TRUE)
     {
       return FALSE;
     }
-    if (value > 100)
-    {
-      return FALSE;
-    }
-    *position = Ros_ClampOpenPctToPosition((uint16_t)value);
+    *position = Ros_ClampOpenPctX10ToPosition(open_x10);
     return TRUE;
   }
 
-  if ((*end != '\0') || (value > 65535U))
+  value = strtoul(text, &end, 10);
+  if ((end == text) || (*end != '\0') || (value > 65535U))
   {
     return FALSE;
   }

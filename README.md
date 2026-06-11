@@ -111,7 +111,7 @@ clamp set [speed] [gripStep] [releaseDelta]
 
 单位：
 
-- `openPos/Pct`：支持绝对位置 `700~2048` 或实测物理开度百分比 `0%~100%`；`700` = `100%` 最大张开，实测开口约 `72mm`，`2048` = `0%` 闭合，例如 `clamp move 100%` 与 `clamp move 700` 等同
+- `openPos/Pct`：支持绝对位置 `700~2048` 或实测物理开度百分比 `0.0%~100.0%`；`700` = `100%` 最大张开，实测开口约 `72mm`，`2048` = `0%` 闭合，例如 `clamp move 100%`、`clamp move 100.0%` 与 `clamp move 700` 等同，也支持 `clamp move 66.0%`
 - `load`：`0.1%`，范围 `100~750`
 - `speed`：`1~3000`，默认 `1000`
 - `gripStep`：`5~100`，默认 `30`
@@ -171,10 +171,10 @@ vacum release
 
 ### 自动监控
 
-- 吸盘掉落检测：`vac1` 和 `vac2` 两路真空度都连续 5 个快速检测周期低于等于 `5%` 时，上报 `@fault dev=vacum event=drop` 并停止吸盘；单路降低但另一路仍能夹稳时不报掉落。
-- 夹爪和吸盘后台状态读取第一次通信失败只打印 `@warn ... action=retry`，连续第二次失败才上报 `@fault` 并退出保持。
+- 吸盘掉落检测：`vac1` 和 `vac2` 两路真空度都连续 5 个快速检测周期低于等于 `5%` 时，上报 `@event level=fault dev=vacum event=drop` 并停止吸盘；单路降低但另一路仍能夹稳时不报掉落。
+- 夹爪和吸盘后台状态读取第一次通信失败只打印 `@event level=warn ... action=retry`，连续第二次失败才上报 `@event level=fault` 并退出保持。
 - 当前快速故障检测固定使用 `200ms`，不支持命令行修改。
-- 已取消周期性 `@status` 自动打印，仅保留夹爪微调 `@info` 和异常停机 `@fault` 自动上报。
+- 已取消周期性 `@status` 自动打印，仅保留 `@event level=info|warn|fault` 后台异步事件上报。
 
 ## 主要特性
 

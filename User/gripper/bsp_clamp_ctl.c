@@ -319,7 +319,7 @@ static uint8_t Clamp_HoldReadStatus(BusServoStatus *status_data)
   clamp_hold.comm_fail_count++;
   if (clamp_hold.comm_fail_count < CLAMP_HOLD_COMM_FAIL_LIMIT)
   {
-    printf("\n@warn dev=clamp event=status_error result=%s servo_err=0x%02X fail_count=%u action=retry",
+    printf("\n@event level=warn dev=clamp event=status_error result=%s servo_err=0x%02X fail_count=%u action=retry",
            BusServo_ResultName(result),
            servo_error,
            clamp_hold.comm_fail_count);
@@ -330,7 +330,7 @@ static uint8_t Clamp_HoldReadStatus(BusServoStatus *status_data)
   devices[DEVICE_CLAMP].error_code = result;
   Clamp_HoldEnd();
   (void)BusServo_SetTorqueEnable(GRIPPER_SERVO_ID_DEFAULT, 0);
-  printf("\n@fault dev=clamp event=status_error result=%s servo_err=0x%02X fail_count=%u action=torque_off",
+  printf("\n@event level=fault dev=clamp event=status_error result=%s servo_err=0x%02X fail_count=%u action=torque_off",
          BusServo_ResultName(result),
          servo_error,
          CLAMP_HOLD_COMM_FAIL_LIMIT);
@@ -364,7 +364,7 @@ static uint8_t Clamp_HoldHandleStable(uint32_t now, const BusServoStatus *status
       ((now - clamp_hold.last_stable_print_tick) >= CLAMP_HOLD_STABLE_PRINT_INTERVAL_MS))
   {
     clamp_hold.last_stable_print_tick = now;
-    printf("\n@info dev=clamp event=hold_stable load=%d target=%u error=%d pos=%d",
+    printf("\n@event level=info dev=clamp event=hold_stable load=%d target=%u error=%d pos=%d",
            status_data->load,
            clamp_hold.target_load,
            error,
@@ -422,7 +422,7 @@ static uint8_t Clamp_HoldCheckDrop(const BusServoStatus *status_data, int16_t lo
   (void)BusServo_SetTorqueEnable(GRIPPER_SERVO_ID_DEFAULT, 0);
   devices[DEVICE_CLAMP].state = DEV_ERROR;
   devices[DEVICE_CLAMP].error_code = DEVICE_FAULT_DROP;
-  printf("\n@fault dev=clamp event=drop load=%d target=%u pos=%d recover=%u action=torque_off",
+  printf("\n@event level=fault dev=clamp event=drop load=%d target=%u pos=%d recover=%u action=torque_off",
          status_data->load,
          fault_target_load,
          status_data->position,
@@ -461,7 +461,7 @@ static void Clamp_HoldApplyAdjust(uint32_t now, uint16_t next_pos,
       ((now - clamp_hold.last_adjust_print_tick) >= CLAMP_HOLD_ADJUST_PRINT_INTERVAL_MS))
   {
     clamp_hold.last_adjust_print_tick = now;
-    printf("\n@info dev=clamp event=hold_pi load=%d target=%u error=%d pos=%d",
+    printf("\n@event level=info dev=clamp event=hold_pi load=%d target=%u error=%d pos=%d",
            status_data->load,
            clamp_hold.target_load,
            error,
@@ -635,9 +635,9 @@ static uint8_t Clamp_PositionValid(uint16_t position)
   return ((position >= GRIPPER_POS_OPEN_MAX) && (position <= GRIPPER_POS_CLOSE_MIN)) ? TRUE : FALSE;
 }
 
-static uint16_t Clamp_OpenPercentToPosition(uint16_t open_pct)
+static uint16_t Clamp_OpenPercentX10ToPosition(uint16_t open_x10)
 {
-  return Gripper_OpenPercentToPosition(open_pct);
+  return Gripper_OpenPercentX10ToPosition(open_x10);
 }
 
 static uint16_t Clamp_PositionToOpenPctX10(uint16_t position)
@@ -645,10 +645,24 @@ static uint16_t Clamp_PositionToOpenPctX10(uint16_t position)
   return Gripper_PositionToOpenPercentX10(Clamp_LimitPosition(position));
 }
 
+static uint8_t Clamp_TextHasPercent(const char *text)
+{
+  while ((text != 0) && (*text != '\0'))
+  {
+    if (*text == '%')
+    {
+      return TRUE;
+    }
+    text++;
+  }
+  return FALSE;
+}
+
 static uint8_t Clamp_ParsePositionArg(const char *text, uint16_t *position)
 {
   char *end;
   long parsed;
+  uint16_t open_x10;
 
   if ((text == 0) || (position == 0))
   {
@@ -659,24 +673,20 @@ static uint8_t Clamp_ParsePositionArg(const char *text, uint16_t *position)
     return FALSE;
   }
 
+  if (Clamp_TextHasPercent(text) != FALSE)
+  {
+    if (Gripper_ParseOpenPercentX10(text, &open_x10) != TRUE)
+    {
+      return FALSE;
+    }
+    *position = Clamp_OpenPercentX10ToPosition(open_x10);
+    return TRUE;
+  }
+
   parsed = strtol(text, &end, 10);
   if (end == text)
   {
     return FALSE;
-  }
-
-  if (*end == '%')
-  {
-    if (*(end + 1) != '\0')
-    {
-      return FALSE;
-    }
-    if ((parsed < 0) || (parsed > 100))
-    {
-      return FALSE;
-    }
-    *position = Clamp_OpenPercentToPosition((uint16_t)parsed);
-    return TRUE;
   }
 
   if (*end != '\0')

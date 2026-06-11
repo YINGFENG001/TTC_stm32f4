@@ -54,6 +54,8 @@ GripperResult Gripper_Release(uint8_t servo_id, uint16_t delta, uint16_t speed,
 GripperResult Gripper_Open(uint8_t servo_id, uint16_t speed, BusServoResult *servo_result);
 GripperResult Gripper_Close(uint8_t servo_id, uint16_t speed, BusServoResult *servo_result);
 uint16_t Gripper_PositionToOpenPercentX10(uint16_t position);
+uint8_t Gripper_ParseOpenPercentX10(const char *text, uint16_t *open_x10);
+uint16_t Gripper_OpenPercentX10ToPosition(uint16_t open_x10);
 uint16_t Gripper_OpenPercentToPosition(uint16_t open_percent);
 const char *Gripper_ResultName(GripperResult result);
 

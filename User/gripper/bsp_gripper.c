@@ -1,5 +1,6 @@
 #include "./gripper/bsp_gripper.h"
 #include "./delay/core_delay.h"
+#include <stdlib.h>
 
 #define GRIPPER_CAL_TABLE_SIZE 14U
 
@@ -358,21 +359,61 @@ uint16_t Gripper_PositionToOpenPercentX10(uint16_t position)
   return gripper_cal_open_x10_table[GRIPPER_CAL_TABLE_SIZE - 1U];
 }
 
-uint16_t Gripper_OpenPercentToPosition(uint16_t open_percent)
+uint8_t Gripper_ParseOpenPercentX10(const char *text, uint16_t *open_x10)
+{
+  char *end;
+  unsigned long whole;
+  uint8_t frac;
+
+  if ((text == 0) || (open_x10 == 0) || (text[0] == '-'))
+  {
+    return 0;
+  }
+
+  whole = strtoul(text, &end, 10);
+  if ((end == text) || (whole > 100UL))
+  {
+    return 0;
+  }
+
+  frac = 0;
+  if (*end == '.')
+  {
+    end++;
+    if ((*end < '0') || (*end > '9'))
+    {
+      return 0;
+    }
+    frac = (uint8_t)(*end - '0');
+    end++;
+  }
+
+  if ((*end != '%') || (*(end + 1) != '\0'))
+  {
+    return 0;
+  }
+  if ((whole == 100UL) && (frac != 0U))
+  {
+    return 0;
+  }
+
+  *open_x10 = (uint16_t)((whole * 10UL) + frac);
+  return 1;
+}
+
+uint16_t Gripper_OpenPercentX10ToPosition(uint16_t open_x10)
 {
   uint8_t i;
-  uint16_t open_x10;
   uint16_t x1;
   uint16_t x2;
   uint16_t y1;
   uint16_t y2;
   uint32_t numerator;
 
-  if (open_percent > 100U)
+  if (open_x10 > 1000U)
   {
-    open_percent = 100U;
+    open_x10 = 1000U;
   }
-  open_x10 = (uint16_t)(open_percent * 10U);
 
   if (open_x10 >= gripper_cal_open_x10_table[0])
   {
@@ -398,6 +439,15 @@ uint16_t Gripper_OpenPercentToPosition(uint16_t open_percent)
   }
 
   return gripper_cal_pos_table[GRIPPER_CAL_TABLE_SIZE - 1U];
+}
+
+uint16_t Gripper_OpenPercentToPosition(uint16_t open_percent)
+{
+  if (open_percent > 100U)
+  {
+    open_percent = 100U;
+  }
+  return Gripper_OpenPercentX10ToPosition((uint16_t)(open_percent * 10U));
 }
 
 const char *Gripper_ResultName(GripperResult result)

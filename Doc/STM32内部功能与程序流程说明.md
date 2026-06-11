@@ -176,8 +176,9 @@ ROS 命令必须以 `#<id>` 开头，例如：
 - `@done`：同步动作完成，或步进异步动作完成。
 - `@state`：状态读取成功。
 - `@err`：参数、范围、设备或通信错误。
-- `@warn`：后台监控第一次通信失败。
-- `@fault`：后台监控确认故障或系统 Fault 记录。
+- `@event level=info`：后台监控普通信息，例如夹爪 PI 调整和稳定保持。
+- `@event level=warn`：后台监控第一次通信失败等可重试告警。
+- `@event level=fault`：后台监控确认故障或系统 Fault 记录。
 
 步进 `move` 是异步动作：
 
@@ -291,13 +292,13 @@ flowchart TD
 复位后 `Safety_ReportLastFault()` 会打印：
 
 ```text
-@fault dev=system event=last_fault type=hard cfsr=... hfsr=... mmfar=... bfar=... reset=iwdg
+@event level=fault dev=system event=last_fault type=hard cfsr=... hfsr=... mmfar=... bfar=... reset=iwdg
 ```
 
 如果只有 IWDG reset 标志但没有 BKPSRAM fault 记录，会打印：
 
 ```text
-@fault dev=system event=last_reset reset=iwdg
+@event level=fault dev=system event=last_reset reset=iwdg
 ```
 
 Fault 上下文里不会尝试夹爪 torque off 或吸盘 stop，因为这些动作依赖阻塞式串口通信，在 Fault 中不安全。当前只保证步进脉冲和使能被关闭，然后依靠 IWDG 自动复位。

@@ -66,7 +66,7 @@ void Vacum_MonitorTask(uint32_t now)
     vacum_hold.comm_fail_count++;
     if (vacum_hold.comm_fail_count < VACUM_COMM_FAIL_LIMIT)
     {
-      printf("\n@warn dev=vacum event=status_error result=%s fail_count=%u action=retry",
+      printf("\n@event level=warn dev=vacum event=status_error result=%s fail_count=%u action=retry",
              Evs08_ResultName(result),
              vacum_hold.comm_fail_count);
       return;
@@ -76,7 +76,7 @@ void Vacum_MonitorTask(uint32_t now)
     devices[DEVICE_VACUM].error_code = result;
     Vacum_HoldEnd();
     (void)Evs08_Stop();
-    printf("\n@fault dev=vacum event=status_error result=%s fail_count=%u action=stop",
+    printf("\n@event level=fault dev=vacum event=status_error result=%s fail_count=%u action=stop",
            Evs08_ResultName(result),
            VACUM_COMM_FAIL_LIMIT);
     return;
@@ -99,7 +99,7 @@ void Vacum_MonitorTask(uint32_t now)
       (void)Evs08_Stop();
       devices[DEVICE_VACUM].state = DEV_ERROR;
       devices[DEVICE_VACUM].error_code = DEVICE_FAULT_DROP;
-      printf("\n@fault dev=vacum event=drop vac1=%u vac2=%u obj1=%u obj2=%u action=stop",
+      printf("\n@event level=fault dev=vacum event=drop vac1=%u vac2=%u obj1=%u obj2=%u action=stop",
              status_data.ch1_vac_percent,
              status_data.ch2_vac_percent,
              status_data.ch1_obj,

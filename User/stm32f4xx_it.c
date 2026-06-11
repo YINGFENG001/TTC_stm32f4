@@ -135,7 +135,7 @@ void Safety_ReportLastFault(void)
 
   if (SAFETY_FAULT_RECORD->magic == SAFETY_FAULT_MAGIC)
   {
-    printf("\n@fault dev=system event=last_fault type=%s cfsr=0x%08lX hfsr=0x%08lX mmfar=0x%08lX bfar=0x%08lX reset=%s",
+    printf("\n@event level=fault dev=system event=last_fault type=%s cfsr=0x%08lX hfsr=0x%08lX mmfar=0x%08lX bfar=0x%08lX reset=%s",
            Safety_FaultName(SAFETY_FAULT_RECORD->fault_type),
            (unsigned long)SAFETY_FAULT_RECORD->cfsr,
            (unsigned long)SAFETY_FAULT_RECORD->hfsr,
@@ -146,7 +146,7 @@ void Safety_ReportLastFault(void)
   }
   else if (iwdg_reset != 0U)
   {
-    printf("\n@fault dev=system event=last_reset reset=iwdg");
+    printf("\n@event level=fault dev=system event=last_reset reset=iwdg");
   }
 
   __HAL_RCC_CLEAR_RESET_FLAGS();
